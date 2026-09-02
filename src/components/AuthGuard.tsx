@@ -150,12 +150,23 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
       return { eyebrow: 'Master Data', title: 'Master Data - Access Delegation' };
     }
 
+    if (currentPath.startsWith('/master-data/schedules')) {
+      return { eyebrow: 'Master Data', title: 'Master Data - Schedules' };
+    }
+
+    if (currentPath.startsWith('/master-data/leave-categories')) {
+      return { eyebrow: 'Master Data', title: 'Master Data - Leave Categories' };
+    }
+
     if (currentPath.startsWith('/master-data')) {
       return { eyebrow: 'Master Data', title: 'Master Data' };
     }
 
     const routeMap: Record<string, string> = {
       '/': 'Dashboard',
+      '/attendance': 'Attendance',
+      '/roster': 'Roster',
+      '/leave': 'Leave Requests',
       '/users': 'Users',
       '/employees': 'Employees',
       '/directors': 'Directors',

@@ -8,7 +8,7 @@ import { fetchReports } from '@/lib/admin-data';
 const emptyReportData = {
   attendance: { totalEmployees: 0, present: 0, late: 0, absent: 0, attendanceRate: 0 },
   leave: { totalLeaveRequests: 0, approved: 0, pending: 0, rejected: 0 },
-  payroll: { totalPayroll: 0, approved: 0, pending: 0, paid: 0 },
+  payroll: { totalPayroll: 0, totalSundayExtraPay: 0, approved: 0, pending: 0, paid: 0 },
   rows: [] as Array<{ department: string; region: string; active: number; present: number; approvals: number; compliance: string; status: string }>,
 };
 
@@ -111,7 +111,7 @@ export default function ReportsPage() {
       {
         label: 'Payroll Total',
         value: `$${(reportData.payroll.totalPayroll || 0).toLocaleString()}`,
-        delta: `${reportData.payroll.paid || 0} paid`,
+        delta: `Sunday extra $${(reportData.payroll.totalSundayExtraPay || 0).toLocaleString()}`,
         tone: 'success',
         icon: '💸',
       },

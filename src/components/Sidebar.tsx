@@ -7,6 +7,7 @@ import { normalizeRole } from '@/lib/utils';
 
 const navItems = [
   { href: '/', label: 'Dashboard' },
+  { href: '/leave', label: 'Leave Requests' },
   { href: '/employees', label: 'Employees' },
   { href: '/directors', label: 'Directors' },
   { href: '/incentives', label: 'Incentives' },
@@ -36,13 +37,20 @@ export default function Sidebar() {
   const [userName, setUserName] = useState('User');
   const [userRole, setUserRole] = useState('Team');
   const [userStore, setUserStore] = useState('');
+  const [isWorkforceOpen, setIsWorkforceOpen] = useState(false);
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
   const [isMasterDataOpen, setIsMasterDataOpen] = useState(false);
 
   const canViewMasterData = true;
+  const canViewWorkforce = true;
   const canViewOnboarding = true;
   const canViewWorkflow = true;
   const canViewDirectors = true;
+
+  useEffect(() => {
+    const isCurrentWorkforceRoute = pathname === '/attendance' || pathname === '/roster';
+    setIsWorkforceOpen(isCurrentWorkforceRoute || pathname.startsWith('/attendance/') || pathname.startsWith('/roster/'));
+  }, [pathname]);
 
   useEffect(() => {
     const isCurrentOnboardingRoute = pathname === '/onboarding' || pathname === '/users' || pathname === '/workflow';
@@ -123,6 +131,45 @@ export default function Sidebar() {
           </Link>
         ))}
 
+        {canViewWorkforce && (
+          <div className="nav-group">
+            <button
+              type="button"
+              className={`nav-group-toggle ${isActiveLink('/attendance') || isActiveLink('/roster') ? 'active' : ''}`}
+              onClick={() => {
+                if (!isWorkforceOpen) {
+                  router.push('/attendance');
+                }
+                setIsWorkforceOpen((open) => !open);
+                setIsOpen(false);
+              }}
+              aria-expanded={isWorkforceOpen}
+            >
+              <span>Workforce</span>
+              <span className="nav-group-caret">{isWorkforceOpen ? '▾' : '▸'}</span>
+            </button>
+
+            {isWorkforceOpen && (
+              <div className="nav-group-children">
+                <Link
+                  href="/attendance"
+                  className={`nav-item nav-item-sub ${isActiveLink('/attendance') ? 'active' : ''}`}
+                  onClick={() => setIsOpen(false)}
+                >
+                  Attendance
+                </Link>
+                <Link
+                  href="/roster"
+                  className={`nav-item nav-item-sub ${isActiveLink('/roster') ? 'active' : ''}`}
+                  onClick={() => setIsOpen(false)}
+                >
+                  Roster
+                </Link>
+              </div>
+            )}
+          </div>
+        )}
+
         {canViewMasterData && (
           <div className="nav-group">
             <button
@@ -163,6 +210,20 @@ export default function Sidebar() {
                   onClick={() => setIsOpen(false)}
                 >
                   Access Delegation
+                </Link>
+                <Link
+                  href="/master-data/schedules"
+                  className={`nav-item nav-item-sub ${isActiveLink('/master-data/schedules') ? 'active' : ''}`}
+                  onClick={() => setIsOpen(false)}
+                >
+                  Schedules
+                </Link>
+                <Link
+                  href="/master-data/leave-categories"
+                  className={`nav-item nav-item-sub ${isActiveLink('/master-data/leave-categories') ? 'active' : ''}`}
+                  onClick={() => setIsOpen(false)}
+                >
+                  Leave Categories
                 </Link>
               </div>
             )}

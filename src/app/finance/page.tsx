@@ -10,13 +10,14 @@ type PayrollRow = {
   owner: string;
   status: 'Active' | 'Pending Review' | 'Approved' | 'Paid';
   budget: string;
+  bonusSplit: string;
 };
 
 export default function FinancePage() {
   const [isLoading, setIsLoading] = useState(true);
-  const [summary, setSummary] = useState({ openPayrollItems: 0, approvalRate: 0, auditExceptions: 0 });
+  const [summary, setSummary] = useState({ openPayrollItems: 0, approvalRate: 0, sundayExtraPay: 0 });
   const [rows, setRows] = useState<PayrollRow[]>([]);
-  const [sortBy, setSortBy] = useState<'entity' | 'owner' | 'status' | 'budget'>('entity');
+  const [sortBy, setSortBy] = useState<'entity' | 'owner' | 'status' | 'budget' | 'bonusSplit'>('entity');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
 
   useEffect(() => {
@@ -25,8 +26,8 @@ export default function FinancePage() {
 
       try {
         const [payrollReport, payrollEntries] = await Promise.all([
-          apiFetchWithRetry<{ totalPayroll?: number; approved?: number; pending?: number; paid?: number }>('/director/reports/payroll'),
-          apiFetchWithRetry<Array<{ _id?: string; employeeId?: string; status?: string; netSalary?: number; baseSalary?: number }>>('/director/payroll').catch(() => []),
+          apiFetchWithRetry<{ totalPayroll?: number; totalSundayExtraPay?: number; approved?: number; pending?: number; paid?: number }>('/director/reports/payroll'),
+          apiFetchWithRetry<Array<{ _id?: string; employeeId?: string; status?: string; netSalary?: number; baseSalary?: number; bonus?: number; sundayExtraPay?: number }>>('/director/payroll').catch(() => []),
         ]);
 
         const openPayrollItems = payrollReport?.pending ?? 0;
@@ -45,6 +46,9 @@ export default function FinancePage() {
                   : statusValue === 'draft'
                     ? 'Pending Review'
                     : 'Active';
+              const totalBonus = Number(entry.bonus ?? 0);
+              const sundayBonus = Number(entry.sundayExtraPay ?? 0);
+              const manualBonus = Math.max(0, totalBonus - sundayBonus);
 
               return {
                 id: entry._id ?? entry.employeeId ?? `${entry.employeeId ?? 'payroll'}-${amount}`,
@@ -52,6 +56,7 @@ export default function FinancePage() {
                 owner: entry.employeeId ?? 'Finance Team',
                 status,
                 budget: new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount),
+                bonusSplit: `Manual ${new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(manualBonus)} / Sunday ${new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(sundayBonus)}`,
               };
             })
           : [];
@@ -59,11 +64,11 @@ export default function FinancePage() {
         setSummary({
           openPayrollItems,
           approvalRate,
-          auditExceptions: Math.max(0, openPayrollItems),
+          sundayExtraPay: Number(payrollReport?.totalSundayExtraPay ?? 0),
         });
         setRows(mappedRows);
       } catch {
-        setSummary({ openPayrollItems: 0, approvalRate: 0, auditExceptions: 0 });
+        setSummary({ openPayrollItems: 0, approvalRate: 0, sundayExtraPay: 0 });
         setRows([]);
       } finally {
         setIsLoading(false);
@@ -82,12 +87,14 @@ export default function FinancePage() {
     return [...rows].sort((first, second) => {
       const comparison = sortBy === 'budget'
         ? parseBudget(first.budget) - parseBudget(second.budget)
-        : String(first[sortBy]).localeCompare(String(second[sortBy]), undefined, { sensitivity: 'base' });
+        : sortBy === 'bonusSplit'
+          ? parseBudget(first.bonusSplit) - parseBudget(second.bonusSplit)
+          : String(first[sortBy]).localeCompare(String(second[sortBy]), undefined, { sensitivity: 'base' });
       return sortDirection === 'asc' ? comparison : -comparison;
     });
   }, [rows, sortBy, sortDirection]);
 
-  const handleSort = (column: 'entity' | 'owner' | 'status' | 'budget') => {
+  const handleSort = (column: 'entity' | 'owner' | 'status' | 'budget' | 'bonusSplit') => {
     if (sortBy === column) {
       setSortDirection((current) => (current === 'asc' ? 'desc' : 'asc'));
       return;
@@ -97,7 +104,7 @@ export default function FinancePage() {
     setSortDirection('asc');
   };
 
-  const getSortArrow = (column: 'entity' | 'owner' | 'status' | 'budget') => {
+  const getSortArrow = (column: 'entity' | 'owner' | 'status' | 'budget' | 'bonusSplit') => {
     if (sortBy !== column) return '↕';
     return sortDirection === 'asc' ? '↑' : '↓';
   };
@@ -123,21 +130,21 @@ export default function FinancePage() {
           </div>
         </div>
         <div className="card metric-card" style={{ flex: '1 1 220px', padding: '18px 20px' }}>
-          <span className="metric-icon">⚠️</span>
+          <span className="metric-icon">💰</span>
           <div className="metric-body">
-            <span className="metric-title">Audit Exceptions</span>
-            <span className="metric-value">{summary.auditExceptions}</span>
-            <span className="metric-meta"><strong className="warning">Action needed</strong></span>
+            <span className="metric-title">Sunday Extra Paid</span>
+            <span className="metric-value">{new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(summary.sundayExtraPay)}</span>
+            <span className="metric-meta"><strong className="info">From roster policy</strong></span>
           </div>
         </div>
       </div>
 
       <div className="card" style={{ padding: 18, borderRadius: 18, border: '1px solid rgba(148,163,184,0.18)', boxShadow: '0 12px 28px rgba(15,23,42,0.04)' }}>
         {isLoading ? (
-          <TableSkeleton columns={4} rows={4} />
+          <TableSkeleton columns={5} rows={4} />
         ) : formattedRows.length > 0 ? (
           <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
-            <table className="table" style={{ minWidth: 620 }}>
+            <table className="table" style={{ minWidth: 860 }}>
               <thead>
                 <tr>
                   <th>
@@ -160,6 +167,11 @@ export default function FinancePage() {
                       Budget {getSortArrow('budget')}
                     </button>
                   </th>
+                  <th>
+                    <button type="button" onClick={() => handleSort('bonusSplit')} style={{ border: 'none', background: 'transparent', color: 'inherit', fontWeight: 800, cursor: 'pointer', padding: 0 }}>
+                      Bonus Split {getSortArrow('bonusSplit')}
+                    </button>
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -169,6 +181,7 @@ export default function FinancePage() {
                     <td>{item.owner}</td>
                     <td><span className={`badge ${item.status === 'Approved' || item.status === 'Paid' ? 'success' : item.status === 'Pending Review' ? 'warning' : 'danger'}`}>{item.status}</span></td>
                     <td>{item.budget}</td>
+                    <td>{item.bonusSplit}</td>
                   </tr>
                 ))}
               </tbody>

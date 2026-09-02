@@ -124,12 +124,12 @@ type ReportRow = { department: string; region: string; active: number; present: 
 export async function fetchReports() {
   const emptyAttendance = { totalEmployees: 0, present: 0, late: 0, absent: 0, attendanceRate: 0 };
   const emptyLeave = { totalLeaveRequests: 0, approved: 0, pending: 0, rejected: 0 };
-  const emptyPayroll = { totalPayroll: 0, approved: 0, pending: 0, paid: 0 };
+  const emptyPayroll = { totalPayroll: 0, totalSundayExtraPay: 0, approved: 0, pending: 0, paid: 0 };
 
   const [attendance, leave, payroll] = await Promise.all([
     apiFetchWithRetry<{ attendanceRate?: number; present?: number; totalEmployees?: number; late?: number; absent?: number }>('/director/reports/attendance'),
     apiFetchWithRetry<{ totalLeaveRequests?: number; approved?: number; pending?: number; rejected?: number }>('/director/reports/leave'),
-    apiFetchWithRetry<{ totalPayroll?: number; approved?: number; pending?: number; paid?: number }>('/director/reports/payroll'),
+    apiFetchWithRetry<{ totalPayroll?: number; totalSundayExtraPay?: number; approved?: number; pending?: number; paid?: number }>('/director/reports/payroll'),
   ]);
 
   return {
@@ -148,6 +148,7 @@ export async function fetchReports() {
     },
     payroll: {
       totalPayroll: payroll?.totalPayroll ?? emptyPayroll.totalPayroll,
+      totalSundayExtraPay: payroll?.totalSundayExtraPay ?? emptyPayroll.totalSundayExtraPay,
       approved: payroll?.approved ?? emptyPayroll.approved,
       pending: payroll?.pending ?? emptyPayroll.pending,
       paid: payroll?.paid ?? emptyPayroll.paid,

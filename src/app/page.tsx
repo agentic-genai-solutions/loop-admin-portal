@@ -39,7 +39,7 @@ function buildDashboardState(
   onboardingProfiles: Array<Record<string, any>>,
   storeMasterRecords: Array<Record<string, any>>,
   attendanceReport: { totalEmployees?: number; attendanceRate?: number; present?: number; late?: number; absent?: number } = {},
-  payrollReport: { totalPayroll?: number; pending?: number; approved?: number; paid?: number } = {},
+  payrollReport: { totalPayroll?: number; totalSundayExtraPay?: number; pending?: number; approved?: number; paid?: number } = {},
 ): DashboardState {
     const storeNameById = new Map<string, string>(
       storeMasterRecords
@@ -258,7 +258,7 @@ export default function HomePage() {
         apiFetch<Array<Record<string, any>>>('/onboarding').catch(() => []),
         apiFetch<Array<Record<string, any>>>('/stores').catch(() => []),
         apiFetch<{ totalEmployees?: number; attendanceRate?: number; present?: number; late?: number; absent?: number }>('/director/reports/attendance').catch(() => ({ totalEmployees: 0, attendanceRate: 0, present: 0, late: 0, absent: 0 })),
-        apiFetch<{ totalPayroll?: number; pending?: number; approved?: number; paid?: number }>('/director/reports/payroll').catch(() => ({ totalPayroll: 0, pending: 0, approved: 0, paid: 0 })),
+        apiFetch<{ totalPayroll?: number; totalSundayExtraPay?: number; pending?: number; approved?: number; paid?: number }>('/director/reports/payroll').catch(() => ({ totalPayroll: 0, totalSundayExtraPay: 0, pending: 0, approved: 0, paid: 0 })),
       ]);
 
       setDashboardState(buildDashboardState(employees, onboardingProfiles, stores, attendanceReport, payrollReport));

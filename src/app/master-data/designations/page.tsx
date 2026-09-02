@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ConfirmDialog, FeedbackToast } from '@/components/Feedback';
 import { apiFetchWithRetry } from '@/lib/api';
+import { getFieldBorder, inlineFieldErrorStyle } from '@/lib/form-ui';
 
 const emptyDesignationForm = {
   code: '',
@@ -31,6 +32,11 @@ type RoleRecord = {
   _id?: string;
   roleCode: string;
   label: string;
+};
+
+type DesignationFormErrors = {
+  label?: string;
+  roleIds?: string;
 };
 
 const iconButtonStyle: React.CSSProperties = {
@@ -63,6 +69,7 @@ export default function DesignationsMasterDataPage() {
   const [sortBy, setSortBy] = useState<'label' | 'roles'>('label');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [pendingDeleteDesignation, setPendingDeleteDesignation] = useState<DesignationRecord | null>(null);
+  const [formErrors, setFormErrors] = useState<DesignationFormErrors>({});
 
   const showToast = useCallback((description: string, type: 'success' | 'error' = 'success', title?: string) => {
     setToast({
@@ -122,13 +129,6 @@ export default function DesignationsMasterDataPage() {
     });
   }, [isFormOpen]);
 
-  const toDesignationCode = (label: string) =>
-    label
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '_')
-      .replace(/^_+|_+$/g, '');
-
   const getApiErrorMessage = (error: unknown, fallback: string) => {
     if (!(error instanceof Error) || !error.message) {
       return fallback;
@@ -155,6 +155,7 @@ export default function DesignationsMasterDataPage() {
     setEditingDesignationCode(null);
     setDesignationForm(emptyDesignationForm);
     setRoleSearch('');
+    setFormErrors({});
   };
 
   const closeDesignationForm = () => {
@@ -163,11 +164,29 @@ export default function DesignationsMasterDataPage() {
   };
 
   const saveDesignation = async () => {
+    const nextErrors: DesignationFormErrors = {};
+
+    if (!designationForm.label.trim()) {
+      nextErrors.label = 'Designation name is required.';
+    }
+
+    if (designationForm.roleIds.length === 0) {
+      nextErrors.roleIds = 'Select at least one role.';
+    }
+
+    if (Object.keys(nextErrors).length > 0) {
+      setFormErrors(nextErrors);
+      return;
+    }
+
+    setFormErrors({});
+
     try {
       const selectedRoleIds = designationForm.roleIds.map((roleId) => String(roleId).trim()).filter(Boolean);
+      const trimmedCode = designationForm.code.trim();
 
       const payload = {
-        code: editingDesignationCode ? designationForm.code : toDesignationCode(designationForm.label),
+        ...(trimmedCode ? { code: trimmedCode } : {}),
         label: designationForm.label,
         roleIds: [...new Set(selectedRoleIds)],
       };
@@ -211,6 +230,7 @@ export default function DesignationsMasterDataPage() {
 
   const openDesignationEditor = (designation: DesignationRecord) => {
     setEditingDesignationCode(designation.code);
+    setFormErrors({});
     setDesignationForm({
       code: designation.code,
       label: designation.label,
@@ -347,15 +367,15 @@ export default function DesignationsMasterDataPage() {
                         setDesignationForm((current) => ({
                           ...current,
                           label: nextLabel,
-                          code: editingDesignationCode ? current.code : toDesignationCode(nextLabel),
                         }));
                       }}
-                      style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(148,163,184,0.35)' }}
+                      style={{ padding: '10px 12px', borderRadius: 10, border: getFieldBorder(Boolean(formErrors.label)) }}
                     />
+                    {formErrors.label && <small style={inlineFieldErrorStyle}>{formErrors.label}</small>}
                   </label>
                   <label style={{ display: 'grid', gap: 8, gridColumn: '1 / -1' }}>
                     <span style={{ fontWeight: 700 }}>Roles</span>
-                    <div style={{ border: '1px solid rgba(148,163,184,0.35)', borderRadius: 10, background: '#fff', padding: 10, display: 'grid', gap: 10 }}>
+                    <div style={{ border: getFieldBorder(Boolean(formErrors.roleIds)), borderRadius: 10, background: '#fff', padding: 10, display: 'grid', gap: 10 }}>
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, minHeight: 26 }}>
                         {designationForm.roleIds.length > 0 ? (
                           designationForm.roleIds.map((roleId) => (
@@ -424,6 +444,7 @@ export default function DesignationsMasterDataPage() {
                         </div>
                       </div>
                     </div>
+                    {formErrors.roleIds && <small style={inlineFieldErrorStyle}>{formErrors.roleIds}</small>}
                   </label>
                 </div>
                 <div style={{ marginTop: 18, display: 'flex', gap: 12, alignItems: 'center' }}>

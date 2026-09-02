@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ConfirmDialog, FeedbackToast } from '@/components/Feedback';
 import { apiFetchWithRetry } from '@/lib/api';
+import { getFieldBorder, inlineFieldErrorStyle } from '@/lib/form-ui';
 import { hasITAdminAccess } from '@/lib/utils';
 
 const typeOptions = [
@@ -98,6 +99,14 @@ type RoleRecord = {
   includeInRoleAccessMatrix?: boolean;
 };
 
+type RoleFormErrors = {
+  label?: string;
+  type?: string;
+  accessLevel?: string;
+  scope?: string;
+  category?: string;
+};
+
 const iconButtonStyle: React.CSSProperties = {
   width: 34,
   height: 34,
@@ -124,6 +133,7 @@ export default function RolesMasterDataPage() {
   const [categoryFilter, setCategoryFilter] = useState('All');
   const [sortBy, setSortBy] = useState<'label' | 'description' | 'category'>('label');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+  const [formErrors, setFormErrors] = useState<RoleFormErrors>({});
 
   const showToast = useCallback((description: string, type: 'success' | 'error' = 'success', title?: string) => {
     setToast({
@@ -161,13 +171,6 @@ export default function RolesMasterDataPage() {
     });
   }, [isFormOpen]);
 
-  const toRoleCode = (label: string) =>
-    label
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '_')
-      .replace(/^_+|_+$/g, '');
-
   const getApiErrorMessage = (error: unknown, fallback: string) => {
     if (!(error instanceof Error) || !error.message) {
       return fallback;
@@ -193,6 +196,7 @@ export default function RolesMasterDataPage() {
   const resetRoleForm = () => {
     setEditingRoleCode(null);
     setRoleForm(emptyRoleForm);
+    setFormErrors({});
   };
 
   const closeRoleForm = () => {
@@ -205,9 +209,41 @@ export default function RolesMasterDataPage() {
   };
 
   const saveRole = async () => {
+    const nextErrors: RoleFormErrors = {};
+
+    if (!roleForm.label.trim()) {
+      nextErrors.label = 'Role name is required.';
+    }
+
+    if (!roleForm.type.trim()) {
+      nextErrors.type = 'Type is required.';
+    }
+
+    if (!roleForm.accessLevel.trim()) {
+      nextErrors.accessLevel = 'Access level is required.';
+    }
+
+    if (!roleForm.scope.trim()) {
+      nextErrors.scope = 'Scope is required.';
+    }
+
+    if (!roleForm.category.trim()) {
+      nextErrors.category = 'Category is required.';
+    }
+
+    if (Object.keys(nextErrors).length > 0) {
+      setFormErrors(nextErrors);
+      return;
+    }
+
+    setFormErrors({});
+
     try {
+      const trimmedRoleCode = roleForm.roleCode.trim();
       const payload = {
-        ...roleForm,
+        ...(trimmedRoleCode ? { roleCode: trimmedRoleCode } : {}),
+        label: roleForm.label,
+        description: roleForm.description,
         type: roleForm.type.trim(),
         accessLevel: roleForm.accessLevel.trim(),
         scope: roleForm.scope.trim(),
@@ -253,6 +289,7 @@ export default function RolesMasterDataPage() {
 
   const openRoleEditor = (role: RoleRecord) => {
     setEditingRoleCode(role.roleCode);
+    setFormErrors({});
     setRoleForm({
       roleCode: role.roleCode,
       label: role.label,
@@ -346,47 +383,51 @@ export default function RolesMasterDataPage() {
                         setRoleForm((current) => ({
                           ...current,
                           label: nextLabel,
-                          roleCode: editingRoleCode ? current.roleCode : toRoleCode(nextLabel),
                         }));
                       }}
-                      style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(148,163,184,0.35)' }}
+                      style={{ padding: '10px 12px', borderRadius: 10, border: getFieldBorder(Boolean(formErrors.label)) }}
                     />
+                    {formErrors.label && <small style={inlineFieldErrorStyle}>{formErrors.label}</small>}
                   </label>
                   <label style={{ display: 'grid', gap: 8 }}>
                     <span style={{ fontWeight: 700 }}>Type</span>
-                    <select value={roleForm.type} onChange={(event) => setRoleForm((current) => ({ ...current, type: event.target.value }))} style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(148,163,184,0.35)' }}>
+                    <select value={roleForm.type} onChange={(event) => setRoleForm((current) => ({ ...current, type: event.target.value }))} style={{ padding: '10px 12px', borderRadius: 10, border: getFieldBorder(Boolean(formErrors.type)) }}>
                       <option value="">Select</option>
                       {typeOptions.map((option) => (
                         <option key={option.id} value={option.code}>{option.label}</option>
                       ))}
                     </select>
+                    {formErrors.type && <small style={inlineFieldErrorStyle}>{formErrors.type}</small>}
                   </label>
                   <label style={{ display: 'grid', gap: 8 }}>
                     <span style={{ fontWeight: 700 }}>Access level</span>
-                    <select value={roleForm.accessLevel} onChange={(event) => setRoleForm((current) => ({ ...current, accessLevel: event.target.value }))} style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(148,163,184,0.35)' }}>
+                    <select value={roleForm.accessLevel} onChange={(event) => setRoleForm((current) => ({ ...current, accessLevel: event.target.value }))} style={{ padding: '10px 12px', borderRadius: 10, border: getFieldBorder(Boolean(formErrors.accessLevel)) }}>
                       <option value="">Select</option>
                       {accessLevelOptions.map((option) => (
                         <option key={option.id} value={option.code}>{option.label}</option>
                       ))}
                     </select>
+                    {formErrors.accessLevel && <small style={inlineFieldErrorStyle}>{formErrors.accessLevel}</small>}
                   </label>
                   <label style={{ display: 'grid', gap: 8 }}>
                     <span style={{ fontWeight: 700 }}>Scope</span>
-                    <select value={roleForm.scope} onChange={(event) => setRoleForm((current) => ({ ...current, scope: event.target.value }))} style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(148,163,184,0.35)' }}>
+                    <select value={roleForm.scope} onChange={(event) => setRoleForm((current) => ({ ...current, scope: event.target.value }))} style={{ padding: '10px 12px', borderRadius: 10, border: getFieldBorder(Boolean(formErrors.scope)) }}>
                       <option value="">Select</option>
                       {scopeOptions.map((option) => (
                         <option key={option.id} value={option.code}>{option.label}</option>
                       ))}
                     </select>
+                    {formErrors.scope && <small style={inlineFieldErrorStyle}>{formErrors.scope}</small>}
                   </label>
                   <label style={{ display: 'grid', gap: 8 }}>
                     <span style={{ fontWeight: 700 }}>Category</span>
-                    <select value={roleForm.category} onChange={(event) => setRoleForm((current) => ({ ...current, category: event.target.value }))} style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(148,163,184,0.35)' }}>
+                    <select value={roleForm.category} onChange={(event) => setRoleForm((current) => ({ ...current, category: event.target.value }))} style={{ padding: '10px 12px', borderRadius: 10, border: getFieldBorder(Boolean(formErrors.category)) }}>
                       <option value="">Select</option>
                       {categoryOptions.map((option) => (
                         <option key={option.id} value={option.code}>{option.label}</option>
                       ))}
                     </select>
+                    {formErrors.category && <small style={inlineFieldErrorStyle}>{formErrors.category}</small>}
                   </label>
                   <label style={{ display: 'grid', gap: 8, gridColumn: '1 / -1' }}>
                     <span style={{ fontWeight: 700 }}>Description</span>
