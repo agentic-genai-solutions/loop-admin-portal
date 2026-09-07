@@ -293,7 +293,7 @@ export default function AttendancePage() {
   }, [attendance.records, statusFilter]);
 
   return (
-    <main style={{ maxWidth: 1280, margin: '0 auto', padding: 28 }}>
+    <main className="portal-page">
       <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
         <div style={{ padding: 20, borderBottom: '1px solid rgba(148,163,184,0.18)', display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -344,7 +344,7 @@ export default function AttendancePage() {
           </div>
         </div>
 
-        <div style={{ padding: 20, display: 'grid', gridTemplateColumns: 'repeat(5, minmax(120px, 1fr))', gap: 12 }}>
+        <div style={{ padding: 20, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 120px), 1fr))', gap: 12 }}>
           <div className="card" style={{ padding: 14, border: '1px solid rgba(148,163,184,0.2)' }}><strong>{attendance.totalEmployees}</strong><div style={{ color: '#64748b', fontSize: 12 }}>Total Employees</div></div>
           <div className="card" style={{ padding: 14, border: '1px solid rgba(16,185,129,0.2)' }}><strong>{attendance.checkedInCount}</strong><div style={{ color: '#64748b', fontSize: 12 }}>Checked In</div></div>
           <div className="card" style={{ padding: 14, border: '1px solid rgba(59,130,246,0.2)' }}><strong>{attendance.checkedOutCount}</strong><div style={{ color: '#64748b', fontSize: 12 }}>Checked Out</div></div>
@@ -352,7 +352,7 @@ export default function AttendancePage() {
           <div className="card" style={{ padding: 14, border: '1px solid rgba(14,165,233,0.2)' }}><strong>{attendanceRate.toFixed(1)}%</strong><div style={{ color: '#64748b', fontSize: 12 }}>Attendance Rate</div></div>
         </div>
 
-        <div style={{ padding: '0 20px 18px', display: 'grid', gridTemplateColumns: 'repeat(4, minmax(120px, 1fr))', gap: 12 }}>
+        <div style={{ padding: '0 20px 18px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 120px), 1fr))', gap: 12 }}>
           <div className="card" style={{ padding: 12, border: '1px solid rgba(34,197,94,0.2)' }}><strong>{attendance.fullDayCount}</strong><div style={{ color: '#64748b', fontSize: 12 }}>Full Day</div></div>
           <div className="card" style={{ padding: 12, border: '1px solid rgba(249,115,22,0.2)' }}><strong>{attendance.halfDayCount}</strong><div style={{ color: '#64748b', fontSize: 12 }}>Half Day</div></div>
           <div className="card" style={{ padding: 12, border: '1px solid rgba(168,85,247,0.2)' }}><strong>{attendance.onLeaveCount}</strong><div style={{ color: '#64748b', fontSize: 12 }}>On Leave</div></div>
@@ -453,7 +453,7 @@ export default function AttendancePage() {
           <div style={{ padding: 24, color: '#64748b', fontWeight: 600 }}>No employee selected.</div>
         ) : (
           <>
-            <div style={{ padding: 20, display: 'grid', gridTemplateColumns: 'repeat(6, minmax(120px, 1fr))', gap: 12 }}>
+            <div style={{ padding: 20, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 120px), 1fr))', gap: 12 }}>
               <div className="card" style={{ padding: 14, border: '1px solid rgba(148,163,184,0.2)' }}><strong>{employeeReport.summary.totalPeriodDays}</strong><div style={{ color: '#64748b', fontSize: 12 }}>Period Days</div></div>
               <div className="card" style={{ padding: 14, border: '1px solid rgba(16,185,129,0.2)' }}><strong>{employeeReport.summary.markedDays}</strong><div style={{ color: '#64748b', fontSize: 12 }}>Marked</div></div>
               <div className="card" style={{ padding: 14, border: '1px solid rgba(34,197,94,0.2)' }}><strong>{employeeReport.summary.presentDays}</strong><div style={{ color: '#64748b', fontSize: 12 }}>Present</div></div>

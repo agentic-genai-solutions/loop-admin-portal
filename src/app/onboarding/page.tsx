@@ -209,7 +209,7 @@ export default function OnboardingPage() {
   };
 
   return (
-    <main style={{ maxWidth: 1200, margin: '0 auto', padding: 28 }}>
+    <main className="portal-page">
       {toast && (
         <FeedbackToast
           title={toast.type === 'success' ? 'Success' : 'Error'}

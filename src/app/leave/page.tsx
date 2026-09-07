@@ -306,13 +306,9 @@ export default function LeaveRequestsPage() {
   };
 
   return (
-    <main style={{ maxWidth: 1280, margin: '0 auto', padding: 24, display: 'grid', gap: 16 }}>
+    <main className="portal-page portal-page-grid" style={{ display: 'grid', gap: 16 }}>
       <div className="card" style={{ display: 'grid', gap: 12 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, alignItems: 'center' }}>
-          <div>
-            <div style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#64748b', fontWeight: 800 }}>Approvals</div>
-            <h2 style={{ margin: '4px 0 0', fontSize: 24 }}>Leave Requests</h2>
-          </div>
 
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'end' }}>
             <label style={{ display: 'grid', gap: 6, color: '#334155', fontWeight: 700, fontSize: 13 }}>

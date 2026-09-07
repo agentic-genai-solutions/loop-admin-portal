@@ -367,11 +367,9 @@ export default function HomePage() {
   };
 
   return (
-    <main className="dashboard-shell">
+    <main className="portal-page dashboard-shell">
         <section className="dashboard-command-bar">
           <div className="dashboard-command-title">
-            <p className="eyebrow">Control Center</p>
-            <h2>Workforce operations snapshot</h2>
             <span className={`dashboard-inline-status ${backendStatus.status}`}>
               <span className="dashboard-inline-status-dot" aria-hidden="true" />
               {backendStatusLabel}
@@ -380,6 +378,7 @@ export default function HomePage() {
           <div className="topbar-actions">
             <ButtonLoader label="Reset dashboard data" variant="secondary" loading={isLoadingDashboard} onClick={resetDashboardData} />
             <ButtonLoader label="Export report" variant="secondary" loading={false} />
+            <Link href="/attendance/timing" className="btn btn-secondary">Attendance timing</Link>
             <Link href="/users" className="primary-button">
               Manage users
             </Link>

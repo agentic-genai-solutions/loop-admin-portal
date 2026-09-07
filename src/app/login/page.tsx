@@ -127,6 +127,14 @@ export default function LoginPage() {
           </button>
         </form>
       </div>
+
+      <div className="mobile-login-tagline">
+        <div className="mobile-login-kicker">MODERN MENSWEAR • DRESS LIFESTYLE</div>
+        <p>
+          Curated essentials for everyday confidence — refined menswear built for movement,
+          comfort, and a sharper personal style.
+        </p>
+      </div>
     </main>
   );
 }

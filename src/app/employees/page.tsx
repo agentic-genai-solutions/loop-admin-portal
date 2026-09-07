@@ -167,11 +167,10 @@ export default function EmployeesPage() {
   }, [assignedStoreName, effectiveStoreId, stores]);
 
   return (
-    <main style={{ maxWidth: 1280, margin: '0 auto', padding: 28 }}>
+    <main className="portal-page">
       <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
         <div style={{ padding: 20, borderBottom: '1px solid rgba(148,163,184,0.18)', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <div style={{ fontSize: 12, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#64748b', fontWeight: 800 }}>Employee directory</div>
             <div style={{ padding: '10px 12px', borderRadius: 10, background: '#eff6ff', color: '#1d4ed8', fontWeight: 700, border: '1px solid rgba(59,130,246,0.18)', width: 'fit-content' }}>
               {visibleStoreLabel}
             </div>

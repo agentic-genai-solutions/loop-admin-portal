@@ -417,13 +417,9 @@ export default function RosterPage() {
   const isProcessingSave = isSavingPolicy || isSavingOverrides || isSavingEmployeeExtras;
 
   return (
-    <main style={{ maxWidth: 1380, margin: '0 auto', padding: 24, display: 'grid', gap: 14 }}>
+    <main className="portal-page portal-page-grid" style={{ display: 'grid', gap: 14 }}>
       <div className="card" style={{ display: 'grid', gap: 14 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-          <div>
-            <div style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#64748b', fontWeight: 800 }}>Operations</div>
-            <h2 style={{ margin: '4px 0 0', fontSize: 24 }}>Roster Module</h2>
-          </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10, alignItems: 'end', minWidth: 'min(100%, 670px)' }}>
             <label style={{ display: 'grid', gap: 6, fontSize: 13, fontWeight: 700, color: '#334155' }}>

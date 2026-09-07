@@ -138,7 +138,7 @@ export default function WorkflowPage() {
   const currentWorkflow = useMemo(() => roleWorkflows[selectedRole] ?? roleWorkflows['Team Member'], [selectedRole]);
 
   return (
-    <main style={{ maxWidth: 1200, margin: '0 auto', padding: '24px 32px 36px' }}>
+    <main className="portal-page">
       <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 16, marginBottom: 20, flexWrap: 'wrap' }}>
         <div style={{ flex: 1 }} />
 

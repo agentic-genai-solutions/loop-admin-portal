@@ -419,7 +419,7 @@ export default function ProfilePage() {
 
   if (loading) {
     return (
-      <main className="dashboard-shell">
+      <main className="portal-page dashboard-shell">
         <div className="panel" style={{ padding: 24 }}>
           <p>Loading profile...</p>
         </div>
@@ -428,10 +428,11 @@ export default function ProfilePage() {
   }
 
   return (
-    <main className="dashboard-shell" style={{ padding: '10px 18px 18px' }}>
-      <section className="panel" style={{ maxWidth: 1280, width: '100%', margin: '0 auto', padding: 0, overflow: 'hidden', borderRadius: 18, display: 'flex', flexDirection: 'column' }}>
+    <main className="portal-page dashboard-shell profile-page-shell">
+      <section className="panel profile-page-panel" style={{ maxWidth: 1280, width: '100%', margin: '0 auto', padding: 0, overflow: 'hidden', borderRadius: 18, display: 'flex', flexDirection: 'column' }}>
         <div style={{ display: 'grid', gap: 0 }}>
           <div
+            className="profile-header-row"
             style={{
               display: 'flex',
               justifyContent: 'space-between',
@@ -443,7 +444,7 @@ export default function ProfilePage() {
               color: '#f8fafc',
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 14, flex: 1, minWidth: 220 }}>
+            <div className="profile-header-identity" style={{ display: 'flex', alignItems: 'center', gap: 14, flex: 1, minWidth: 220 }}>
               {profile.profileImage ? (
                 <img
                   src={profile.profileImage}
@@ -479,17 +480,17 @@ export default function ProfilePage() {
 
               <div style={{ minWidth: 0, display: 'grid', gap: 4 }}>
                 <p className="eyebrow" style={{ color: 'rgba(226,232,240,0.72)', margin: 0, letterSpacing: '0.18em', fontSize: 10 }}>Overview</p>
-                <h2 style={{ margin: 0, fontSize: 'clamp(1.25rem, 1.5vw, 1.9rem)', lineHeight: 1.1, letterSpacing: '-0.04em', color: '#f8fafc', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                <h2 className="profile-name" style={{ margin: 0, fontSize: 'clamp(1.25rem, 1.5vw, 1.9rem)', lineHeight: 1.1, letterSpacing: '-0.04em', color: '#f8fafc', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                   {profileName}
                 </h2>
-                <div style={{ color: 'rgba(226,232,240,0.9)', fontWeight: 700, fontSize: 12 }}>{designationLabel || 'Designation not set'}</div>
+                <div className="profile-designation" style={{ color: 'rgba(226,232,240,0.9)', fontWeight: 700, fontSize: 12 }}>{designationLabel || 'Designation not set'}</div>
               </div>
             </div>
 
             {!isEditing && (
               <button
                 type="button"
-                className="primary-button"
+                className="primary-button profile-edit-button"
                 onClick={openEditMode}
                 style={{
                   background: '#ffffff',
@@ -511,6 +512,7 @@ export default function ProfilePage() {
           {!isEditing && (
             <>
               <div
+                className="profile-tabs-row"
                 style={{
                   display: 'grid',
                   gridTemplateColumns: '1fr auto',
@@ -522,7 +524,7 @@ export default function ProfilePage() {
                   borderBottom: '1px solid #dfe7f0',
                 }}
               >
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                <div className="profile-tabs" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                   {[
                     { key: 'overview', label: 'Overview' },
                     { key: 'personal', label: 'Personal' },
@@ -531,6 +533,7 @@ export default function ProfilePage() {
                     <button
                       key={tab.key}
                       type="button"
+                      className="profile-tab-button"
                       onClick={() => setActiveTab(tab.key as 'overview' | 'personal' | 'employment')}
                       style={{
                         minWidth: 118,
@@ -552,7 +555,7 @@ export default function ProfilePage() {
 
                 <button
                   type="button"
-                  className="secondary-button"
+                  className="secondary-button profile-password-button"
                   onClick={openPasswordModal}
                   style={{
                     border: '1px solid #cbd5e1',
@@ -571,36 +574,36 @@ export default function ProfilePage() {
               </div>
 
               {activeTab === 'overview' && (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10, padding: '12px 22px 12px', background: '#f8fafc' }}>
-                  <div className="panel" style={{ padding: 10, background: '#f8fafc' }}>
+                <div className="profile-content-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10, padding: '12px 22px 12px', background: '#f8fafc' }}>
+                  <div className="panel profile-summary-card" style={{ padding: 10, background: '#f8fafc' }}>
                     <div style={{ color: '#64748b', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Email</div>
                     <div style={{ marginTop: 6, fontWeight: 700, fontSize: 13 }}>{profile.email || 'Not set'}</div>
                   </div>
-                  <div className="panel" style={{ padding: 12, background: '#f8fafc' }}>
+                  <div className="panel profile-summary-card" style={{ padding: 12, background: '#f8fafc' }}>
                     <div style={{ color: '#64748b', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Mobile</div>
                     <div style={{ marginTop: 6, fontWeight: 700, fontSize: 13 }}>{profile.mobile || 'Not set'}</div>
                   </div>
-                  <div className="panel" style={{ padding: 12, background: '#f8fafc' }}>
+                  <div className="panel profile-summary-card" style={{ padding: 12, background: '#f8fafc' }}>
                     <div style={{ color: '#64748b', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Designation</div>
                     <div style={{ marginTop: 6, fontWeight: 700, fontSize: 13 }}>{designationLabel || 'Not set'}</div>
                   </div>
-                  <div className="panel" style={{ padding: 12, background: '#f8fafc' }}>
+                  <div className="panel profile-summary-card" style={{ padding: 12, background: '#f8fafc' }}>
                     <div style={{ color: '#64748b', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Gender</div>
                     <div style={{ marginTop: 6, fontWeight: 700, fontSize: 13 }}>{profile.gender ? profile.gender.charAt(0).toUpperCase() + profile.gender.slice(1).replace(/_/g, ' ') : 'Not set'}</div>
                   </div>
-                  <div className="panel" style={{ padding: 12, background: '#f8fafc' }}>
+                  <div className="panel profile-summary-card" style={{ padding: 12, background: '#f8fafc' }}>
                     <div style={{ color: '#64748b', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Blood Group</div>
                     <div style={{ marginTop: 6, fontWeight: 700, fontSize: 13 }}>{profile.bloodGroup || 'Not set'}</div>
                   </div>
-                  <div className="panel" style={{ padding: 12, background: '#f8fafc' }}>
+                  <div className="panel profile-summary-card" style={{ padding: 12, background: '#f8fafc' }}>
                     <div style={{ color: '#64748b', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Joined</div>
                     <div style={{ marginTop: 6, fontWeight: 700, fontSize: 13 }}>{formatDateValue(profile.joinedDate)}</div>
                   </div>
-                  <div className="panel" style={{ padding: 12, background: '#f8fafc' }}>
+                  <div className="panel profile-summary-card" style={{ padding: 12, background: '#f8fafc' }}>
                     <div style={{ color: '#64748b', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Date of Birth</div>
                     <div style={{ marginTop: 6, fontWeight: 700, fontSize: 13 }}>{formatDateValue(profile.dateOfBirth)}</div>
                   </div>
-                  <div className="panel" style={{ padding: 12, background: '#f8fafc' }}>
+                  <div className="panel profile-summary-card" style={{ padding: 12, background: '#f8fafc' }}>
                     <div style={{ color: '#64748b', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Status</div>
                     <div style={{ marginTop: 6, fontWeight: 700, fontSize: 13 }}>{profile.isActive === false ? 'Inactive' : 'Active'}</div>
                   </div>
@@ -608,36 +611,36 @@ export default function ProfilePage() {
               )}
 
               {activeTab === 'personal' && (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 18, padding: '18px 28px 0', background: '#f8fafc' }}>
-                  <div className="panel" style={{ padding: 16, background: '#f8fafc' }}>
+                <div className="profile-content-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 18, padding: '18px 28px 0', background: '#f8fafc' }}>
+                  <div className="panel profile-summary-card" style={{ padding: 16, background: '#f8fafc' }}>
                     <div style={{ color: '#64748b', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Title</div>
                     <div style={{ marginTop: 6, fontWeight: 700, fontSize: 13 }}>{profile.title || 'Not set'}</div>
                   </div>
-                  <div className="panel" style={{ padding: 16, background: '#f8fafc' }}>
+                  <div className="panel profile-summary-card" style={{ padding: 16, background: '#f8fafc' }}>
                     <div style={{ color: '#64748b', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em' }}>First name</div>
                     <div style={{ marginTop: 6, fontWeight: 700, fontSize: 13 }}>{profile.firstName || 'Not set'}</div>
                   </div>
-                  <div className="panel" style={{ padding: 16, background: '#f8fafc' }}>
+                  <div className="panel profile-summary-card" style={{ padding: 16, background: '#f8fafc' }}>
                     <div style={{ color: '#64748b', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Last name</div>
                     <div style={{ marginTop: 6, fontWeight: 700, fontSize: 13 }}>{profile.lastName || 'Not set'}</div>
                   </div>
-                  <div className="panel" style={{ padding: 16, background: '#f8fafc' }}>
+                  <div className="panel profile-summary-card" style={{ padding: 16, background: '#f8fafc' }}>
                     <div style={{ color: '#64748b', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Email</div>
                     <div style={{ marginTop: 6, fontWeight: 700, fontSize: 13 }}>{profile.email || 'Not set'}</div>
                   </div>
-                  <div className="panel" style={{ padding: 16, background: '#f8fafc' }}>
+                  <div className="panel profile-summary-card" style={{ padding: 16, background: '#f8fafc' }}>
                     <div style={{ color: '#64748b', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Mobile</div>
                     <div style={{ marginTop: 6, fontWeight: 700, fontSize: 13 }}>{profile.mobile || 'Not set'}</div>
                   </div>
-                  <div className="panel" style={{ padding: 16, background: '#f8fafc' }}>
+                  <div className="panel profile-summary-card" style={{ padding: 16, background: '#f8fafc' }}>
                     <div style={{ color: '#64748b', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Date of birth</div>
                     <div style={{ marginTop: 6, fontWeight: 700, fontSize: 13 }}>{formatDateValue(profile.dateOfBirth)}</div>
                   </div>
-                  <div className="panel" style={{ padding: 16, background: '#f8fafc' }}>
+                  <div className="panel profile-summary-card" style={{ padding: 16, background: '#f8fafc' }}>
                     <div style={{ color: '#64748b', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Blood group</div>
                     <div style={{ marginTop: 6, fontWeight: 700, fontSize: 13 }}>{profile.bloodGroup || 'Not set'}</div>
                   </div>
-                  <div className="panel" style={{ padding: 16, background: '#f8fafc' }}>
+                  <div className="panel profile-summary-card" style={{ padding: 16, background: '#f8fafc' }}>
                     <div style={{ color: '#64748b', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Gender</div>
                     <div style={{ marginTop: 6, fontWeight: 700, fontSize: 13 }}>{profile.gender ? profile.gender.charAt(0).toUpperCase() + profile.gender.slice(1).replace(/_/g, ' ') : 'Not set'}</div>
                   </div>
@@ -645,16 +648,16 @@ export default function ProfilePage() {
               )}
 
               {activeTab === 'employment' && (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 18, padding: '18px 28px 0', background: '#f8fafc' }}>
-                  <div className="panel" style={{ padding: 16, background: '#f8fafc' }}>
+                <div className="profile-content-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 18, padding: '18px 28px 0', background: '#f8fafc' }}>
+                  <div className="panel profile-summary-card" style={{ padding: 16, background: '#f8fafc' }}>
                     <div style={{ color: '#64748b', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Designation</div>
                     <div style={{ marginTop: 6, fontWeight: 700, fontSize: 13 }}>{designationLabel || 'Not set'}</div>
                   </div>
-                  <div className="panel" style={{ padding: 16, background: '#f8fafc' }}>
+                  <div className="panel profile-summary-card" style={{ padding: 16, background: '#f8fafc' }}>
                     <div style={{ color: '#64748b', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Joined date</div>
                     <div style={{ marginTop: 6, fontWeight: 700, fontSize: 13 }}>{formatDateValue(profile.joinedDate)}</div>
                   </div>
-                  <div className="panel" style={{ padding: 16, background: '#f8fafc' }}>
+                  <div className="panel profile-summary-card" style={{ padding: 16, background: '#f8fafc' }}>
                     <div style={{ color: '#64748b', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Status</div>
                     <div style={{ marginTop: 6, fontWeight: 700, fontSize: 13 }}>{profile.isActive === false ? 'Inactive' : 'Active'}</div>
                   </div>
@@ -680,7 +683,7 @@ export default function ProfilePage() {
               onClick={closeEditMode}
             >
               <div
-                className="profile-modal-card"
+                className="profile-modal-card profile-edit-modal"
                 role="dialog"
                 aria-modal="true"
                 onClick={(event) => event.stopPropagation()}
@@ -946,7 +949,7 @@ export default function ProfilePage() {
               onClick={closePasswordModal}
             >
               <div
-                className="profile-modal-card"
+                className="profile-modal-card profile-password-modal"
                 role="dialog"
                 aria-modal="true"
                 onClick={(event) => event.stopPropagation()}
@@ -1109,6 +1112,121 @@ export default function ProfilePage() {
           )}
         </div>
       </section>
+      <style jsx>{`
+        .profile-page-shell {
+          padding: 10px 14px 18px;
+        }
+
+        .profile-header-row {
+          min-width: 0;
+        }
+
+        .profile-header-identity {
+          min-width: 0;
+        }
+
+        .profile-name {
+          white-space: normal;
+        }
+
+        .profile-designation {
+          white-space: normal;
+        }
+
+        .profile-tabs-row {
+          grid-template-columns: 1fr auto;
+        }
+
+        .profile-tabs {
+          min-width: 0;
+        }
+
+        .profile-tab-button {
+          flex: 1 1 auto;
+        }
+
+        .profile-content-grid {
+          min-width: 0;
+        }
+
+        .profile-summary-card {
+          min-width: 0;
+          overflow-wrap: anywhere;
+        }
+
+        @media (max-width: 576px) {
+          .profile-page-shell {
+            padding: 10px 8px 16px;
+          }
+
+          .profile-page-panel {
+            border-radius: 14px !important;
+          }
+
+          .profile-header-row {
+            padding: 12px 14px 10px !important;
+          }
+
+          .profile-header-identity {
+            width: 100%;
+            align-items: flex-start;
+          }
+
+          .profile-header-identity img,
+          .profile-header-identity > div:last-child {
+            width: auto;
+          }
+
+          .profile-name {
+            white-space: normal;
+            overflow: visible;
+            text-overflow: unset;
+          }
+
+          .profile-edit-button,
+          .profile-password-button {
+            width: 100%;
+          }
+
+          .profile-tabs-row {
+            grid-template-columns: 1fr;
+            padding: 10px 12px 0 !important;
+          }
+
+          .profile-tabs {
+            width: 100%;
+            display: grid !important;
+            grid-template-columns: 1fr;
+            gap: 8px;
+          }
+
+          .profile-tab-button {
+            width: 100%;
+            min-width: 0;
+          }
+
+          .profile-content-grid {
+            grid-template-columns: 1fr !important;
+            padding: 12px !important;
+          }
+
+          .profile-summary-card {
+            padding: 12px !important;
+          }
+
+          .profile-edit-modal,
+          .profile-password-modal {
+            width: min(100%, 100%) !important;
+            max-width: 100% !important;
+            margin: 0 auto;
+            border-radius: 16px !important;
+          }
+
+          .profile-modal-layer {
+            padding: 12px !important;
+          }
+        }
+      `}</style>
     </main>
   );
 }

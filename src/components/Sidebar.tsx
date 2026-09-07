@@ -6,14 +6,12 @@ import { useEffect, useMemo, useState } from 'react';
 import { normalizeRole } from '@/lib/utils';
 
 const navItems = [
-  { href: '/', label: 'Dashboard' },
   { href: '/leave', label: 'Leave Requests' },
   { href: '/employees', label: 'Employees' },
   { href: '/directors', label: 'Directors' },
-  { href: '/incentives', label: 'Incentives' },
+  { href: '/messages', label: 'Messages' },
   { href: '/reports', label: 'Reports' },
   { href: '/stores', label: 'Store Management' },
-  { href: '/finance', label: 'Finance' },
 ];
 
 function resolveDisplayName(parsedUser: Record<string, any> | null | undefined) {
@@ -37,15 +35,28 @@ export default function Sidebar() {
   const [userName, setUserName] = useState('User');
   const [userRole, setUserRole] = useState('Team');
   const [userStore, setUserStore] = useState('');
+  const [isAdminOpen, setIsAdminOpen] = useState(false);
+  const [isIncentivesOpen, setIsIncentivesOpen] = useState(false);
   const [isWorkforceOpen, setIsWorkforceOpen] = useState(false);
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
   const [isMasterDataOpen, setIsMasterDataOpen] = useState(false);
 
+  const canViewAdmin = true;
   const canViewMasterData = true;
   const canViewWorkforce = true;
   const canViewOnboarding = true;
   const canViewWorkflow = true;
   const canViewDirectors = true;
+
+  useEffect(() => {
+    const isCurrentAdminRoute = pathname === '/leave' || pathname === '/employees' || pathname === '/directors' || pathname === '/reports' || pathname === '/stores' || pathname === '/messages';
+    setIsAdminOpen(isCurrentAdminRoute || pathname.startsWith('/leave/') || pathname.startsWith('/employees/') || pathname.startsWith('/directors/') || pathname.startsWith('/reports/') || pathname.startsWith('/stores/') || pathname.startsWith('/messages/'));
+  }, [pathname]);
+
+  useEffect(() => {
+    const isCurrentIncentivesRoute = pathname === '/incentives' || pathname.startsWith('/incentives/');
+    setIsIncentivesOpen(isCurrentIncentivesRoute);
+  }, [pathname]);
 
   useEffect(() => {
     const isCurrentWorkforceRoute = pathname === '/attendance' || pathname === '/roster';
@@ -120,16 +131,84 @@ export default function Sidebar() {
       </button>
 
       <nav id="sidebar-nav" className={`sidebar-nav ${isOpen ? 'visible' : ''}`} aria-label="Sidebar navigation">
-        {visibleNavItems.map((item) => (
-          <Link
-            key={item.href}
-            href={item.href}
-            className={`nav-item ${isActiveLink(item.href) ? 'active' : ''}`}
-            onClick={() => setIsOpen(false)}
+        <Link
+          href="/"
+          className={`nav-item ${isActiveLink('/') ? 'active' : ''}`}
+          onClick={() => setIsOpen(false)}
+        >
+          Dashboard
+        </Link>
+
+        <div className="nav-group">
+          <button
+            type="button"
+            className={`nav-group-toggle ${isIncentivesOpen ? 'active' : ''}`}
+            onClick={() => {
+              if (!isIncentivesOpen) {
+                router.push('/incentives');
+              }
+              setIsIncentivesOpen((open) => !open);
+              setIsOpen(false);
+            }}
+            aria-expanded={isIncentivesOpen}
           >
-            {item.label}
-          </Link>
-        ))}
+            <span>Incentives</span>
+            <span className="nav-group-caret">{isIncentivesOpen ? '▾' : '▸'}</span>
+          </button>
+
+          {isIncentivesOpen && (
+            <div className="nav-group-children">
+              <Link
+                href="/incentives"
+                className={`nav-item nav-item-sub ${pathname === '/incentives' ? 'active' : ''}`}
+                onClick={() => setIsOpen(false)}
+              >
+                Overview
+              </Link>
+              <Link href="/incentives/programs" className={`nav-item nav-item-sub ${isActiveLink('/incentives/programs') ? 'active' : ''}`} onClick={() => setIsOpen(false)}>Programs</Link>
+              <Link href="/incentives/entries" className={`nav-item nav-item-sub ${isActiveLink('/incentives/entries') ? 'active' : ''}`} onClick={() => setIsOpen(false)}>Staff Entries</Link>
+            </div>
+          )}
+        </div>
+
+        <Link href="/finance" className={`nav-item ${isActiveLink('/finance') ? 'active' : ''}`} aria-current={isActiveLink('/finance') ? 'page' : undefined} onClick={() => setIsOpen(false)}>
+          Finance
+        </Link>
+
+        {canViewAdmin && (
+          <div className="nav-group">
+            <button
+              type="button"
+              className={`nav-group-toggle ${isAdminOpen ? 'active' : ''}`}
+              onClick={() => {
+                if (!isAdminOpen) {
+                  router.push('/leave');
+                }
+                setIsAdminOpen((open) => !open);
+                setIsOpen(false);
+              }}
+              aria-expanded={isAdminOpen}
+            >
+              <span>Admin</span>
+              <span className="nav-group-caret">{isAdminOpen ? '▾' : '▸'}</span>
+            </button>
+
+            {isAdminOpen && (
+              <div className="nav-group-children">
+                {visibleNavItems.map((item) => (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className={`nav-item nav-item-sub ${isActiveLink(item.href) ? 'active' : ''}`}
+                    onClick={() => setIsOpen(false)}
+                  >
+                    {item.label}
+                  </Link>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {canViewWorkforce && (
           <div className="nav-group">
@@ -153,11 +232,12 @@ export default function Sidebar() {
               <div className="nav-group-children">
                 <Link
                   href="/attendance"
-                  className={`nav-item nav-item-sub ${isActiveLink('/attendance') ? 'active' : ''}`}
+                  className={`nav-item nav-item-sub ${pathname === '/attendance' ? 'active' : ''}`}
                   onClick={() => setIsOpen(false)}
                 >
                   Attendance
                 </Link>
+                <Link href="/attendance/timing" className={`nav-item nav-item-sub ${pathname === '/attendance/timing' ? 'active' : ''}`} onClick={() => setIsOpen(false)}>Timing Rules</Link>
                 <Link
                   href="/roster"
                   className={`nav-item nav-item-sub ${isActiveLink('/roster') ? 'active' : ''}`}

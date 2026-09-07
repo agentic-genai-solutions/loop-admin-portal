@@ -9,12 +9,14 @@ const emptyReportData = {
   attendance: { totalEmployees: 0, present: 0, late: 0, absent: 0, attendanceRate: 0 },
   leave: { totalLeaveRequests: 0, approved: 0, pending: 0, rejected: 0 },
   payroll: { totalPayroll: 0, totalSundayExtraPay: 0, approved: 0, pending: 0, paid: 0 },
-  rows: [] as Array<{ department: string; region: string; active: number; present: number; approvals: number; compliance: string; status: string }>,
+  summary: { attendanceRate: 0, leaveUtilization: 0, payrollTotal: 0, pendingActions: 0 },
+  rows: [] as Array<{ department: string; region: string; active: number; present: number; approvals: number; compliance: string; status: 'Healthy' | 'Watch' | 'At Risk' }>,
 };
 
 export default function ReportsPage() {
   const [query, setQuery] = useState('');
-  const [view, setView] = useState('All');
+  const [departmentFilter, setDepartmentFilter] = useState('All');
+  const [regionFilter, setRegionFilter] = useState('All');
   const [status, setStatus] = useState('All');
   const [sortBy, setSortBy] = useState<'department' | 'region' | 'active' | 'present' | 'approvals' | 'compliance' | 'status'>('department');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
@@ -42,19 +44,28 @@ export default function ReportsPage() {
   }, [showToast]);
 
   useEffect(() => {
-    loadReports();
+    void loadReports();
   }, [loadReports]);
+
+  const departmentOptions = useMemo(() => {
+    const departments = new Set(reportData.rows.map((row) => row.department));
+    return ['All', ...Array.from(departments)];
+  }, [reportData.rows]);
+
+  const regionOptions = useMemo(() => {
+    const regions = new Set(reportData.rows.map((row) => row.region));
+    return ['All', ...Array.from(regions)];
+  }, [reportData.rows]);
 
   const filteredRows = useMemo(() => {
     return reportData.rows.filter((row) => {
-      const matchesQuery =
-        row.department.toLowerCase().includes(query.toLowerCase()) ||
-        row.region.toLowerCase().includes(query.toLowerCase());
-      const matchesView = view === 'All' || row.region === view || row.department === view;
+      const matchesQuery = row.department.toLowerCase().includes(query.toLowerCase()) || row.region.toLowerCase().includes(query.toLowerCase());
+      const matchesDepartment = departmentFilter === 'All' || row.department === departmentFilter;
+      const matchesRegion = regionFilter === 'All' || row.region === regionFilter;
       const matchesStatus = status === 'All' || row.status === status;
-      return matchesQuery && matchesView && matchesStatus;
+      return matchesQuery && matchesDepartment && matchesRegion && matchesStatus;
     });
-  }, [query, view, status, reportData.rows]);
+  }, [departmentFilter, query, regionFilter, reportData.rows, status]);
 
   const sortedRows = useMemo(() => {
     const parseCompliance = (value: string) => {
@@ -69,6 +80,8 @@ export default function ReportsPage() {
         comparison = first[sortBy] - second[sortBy];
       } else if (sortBy === 'compliance') {
         comparison = parseCompliance(first.compliance) - parseCompliance(second.compliance);
+      } else if (sortBy === 'status') {
+        comparison = String(first.status).localeCompare(String(second.status), undefined, { sensitivity: 'base' });
       } else {
         comparison = String(first[sortBy]).localeCompare(String(second[sortBy]), undefined, { sensitivity: 'base' });
       }
@@ -96,28 +109,28 @@ export default function ReportsPage() {
     () => [
       {
         label: 'Attendance Compliance',
-        value: `${(reportData.attendance.attendanceRate || 0).toFixed(1)}%`,
-        delta: '+0.0%',
+        value: `${(reportData.summary.attendanceRate || reportData.attendance.attendanceRate || 0).toFixed(1)}%`,
+        delta: `${reportData.attendance.present || 0} present / ${reportData.attendance.totalEmployees || 0} staff`,
         tone: 'success',
         icon: '📊',
       },
       {
         label: 'Leave Utilization',
-        value: `${reportData.leave.totalLeaveRequests || 0}`,
-        delta: `${reportData.leave.approved || 0} approved`,
+        value: `${(reportData.summary.leaveUtilization || 0).toFixed(0)}%`,
+        delta: `${reportData.leave.approved || 0} approved / ${reportData.leave.totalLeaveRequests || 0} total`,
         tone: 'info',
         icon: '🌴',
       },
       {
         label: 'Payroll Total',
-        value: `$${(reportData.payroll.totalPayroll || 0).toLocaleString()}`,
+        value: `$${(reportData.summary.payrollTotal || reportData.payroll.totalPayroll || 0).toLocaleString()}`,
         delta: `Sunday extra $${(reportData.payroll.totalSundayExtraPay || 0).toLocaleString()}`,
         tone: 'success',
         icon: '💸',
       },
       {
         label: 'Pending Actions',
-        value: `${(reportData.payroll.pending || 0) + (reportData.leave.pending || 0)}`,
+        value: `${reportData.summary.pendingActions || (reportData.payroll.pending || 0) + (reportData.leave.pending || 0) || 0}`,
         delta: `${reportData.leave.pending || 0} leave / ${(reportData.payroll.pending || 0)} payroll`,
         tone: 'warning',
         icon: '⚡',
@@ -129,15 +142,7 @@ export default function ReportsPage() {
   const exportCsv = () => {
     const csv = [
       ['Department', 'Region', 'Active Staff', 'Present Today', 'Pending Approvals', 'Compliance', 'Status'],
-      ...filteredRows.map((row) => [
-        row.department,
-        row.region,
-        row.active,
-        row.present,
-        row.approvals,
-        row.compliance,
-        row.status,
-      ]),
+      ...filteredRows.map((row) => [row.department, row.region, row.active, row.present, row.approvals, row.compliance, row.status]),
     ]
       .map((cols) => cols.map((value) => `"${String(value).replace(/"/g, '""')}"`).join(','))
       .join('\n');
@@ -156,75 +161,72 @@ export default function ReportsPage() {
   };
 
   return (
-    <main style={{ maxWidth: 1300, margin: '0 auto', padding: 28 }}>
+    <main className="portal-page">
       {toast && (
         <FeedbackToast
           title={toast.type === 'success' ? 'Success' : 'Error'}
           description={toast.message}
           type={toast.type}
           onClose={() => setToast(null)}
-          durationMs={3200}
+          durationMs={3400}
         />
       )}
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, gap: 16, flexWrap: 'wrap' }}>
-        <div style={{ flex: 1 }} />
 
         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-          <button type="button" onClick={exportCsv} style={{ padding: '11px 16px', border: '1px solid #dfe6f0', borderRadius: 10, background: '#fff', cursor: 'pointer', fontWeight: 700 }}>
+          <button type="button" onClick={exportCsv} style={{ padding: '11px 18px', border: '1px solid rgba(148,163,184,0.28)', borderRadius: 12, background: '#fff', cursor: 'pointer', fontWeight: 700, color: '#0f172a' }}>
             Export CSV
           </button>
-          <button type="button" onClick={exportPdf} style={{ padding: '11px 16px', border: 'none', borderRadius: 10, background: '#111827', color: '#fff', cursor: 'pointer', fontWeight: 700 }}>
+          <button type="button" onClick={exportPdf} style={{ padding: '11px 18px', border: 'none', borderRadius: 12, background: '#111827', color: '#fff', cursor: 'pointer', fontWeight: 700 }}>
             Export PDF
           </button>
         </div>
       </div>
 
-      <div className="row" style={{ marginBottom: 20 }}>
+      <div className="row" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16, marginBottom: 22 }}>
         {reportCards.map((card) => (
-          <div key={card.label} className="card metric-card" style={{ flex: '1 1 220px', padding: '18px 20px' }}>
-            <span className="metric-icon">{card.icon}</span>
+          <div key={card.label} className="card metric-card" style={{ padding: '18px 20px', minHeight: 130 }}>
+            <span className="metric-icon" aria-hidden="true">{card.icon}</span>
             <div className="metric-body">
               <span className="metric-title">{card.label}</span>
               <span className="metric-value">{card.value}</span>
-              <span className="metric-meta"><strong className={card.tone}>{card.delta}</strong> vs last month</span>
+              <span className="metric-meta">
+                <strong className={card.tone}>{card.delta}</strong>
+              </span>
             </div>
           </div>
         ))}
       </div>
 
-      <div className="card" style={{ marginBottom: 24, padding: 18, borderRadius: 18, border: '1px solid rgba(148,163,184,0.18)', boxShadow: '0 12px 28px rgba(15,23,42,0.04)' }}>
+      <div className="card" style={{ padding: 18, borderRadius: 18, border: '1px solid rgba(148,163,184,0.18)', boxShadow: '0 12px 28px rgba(15,23,42,0.04)' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginBottom: 18 }}>
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder="Search department or region"
-              style={{ minWidth: 220, padding: '10px 12px', borderRadius: 10, border: '1px solid #dfe6f0', background: '#fff' }}
+              style={{ minWidth: 220, padding: '10px 12px', borderRadius: 12, border: '1px solid rgba(148,163,184,0.3)', background: '#fff' }}
             />
 
-            <select value={view} onChange={(event) => setView(event.target.value)} style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid #dfe6f0', background: '#fff' }}>
-              <option>All</option>
-              <option>Retail Stores</option>
-              <option>Warehouse</option>
-              <option>Finance</option>
-              <option>Leadership</option>
-              <option>Support</option>
-              <option>North</option>
-              <option>Central</option>
-              <option>West</option>
-              <option>Head Office</option>
-              <option>Corporate</option>
-              <option>South</option>
+            <select value={departmentFilter} onChange={(event) => setDepartmentFilter(event.target.value)} style={{ padding: '10px 12px', borderRadius: 12, border: '1px solid rgba(148,163,184,0.3)', background: '#fff', minWidth: 180 }}>
+              {departmentOptions.map((department) => (
+                <option key={department} value={department}>{department === 'All' ? 'All departments' : department}</option>
+              ))}
             </select>
 
-            <select value={status} onChange={(event) => setStatus(event.target.value)} style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid #dfe6f0', background: '#fff' }}>
-              <option>All</option>
-              <option>Healthy</option>
-              <option>Watch</option>
-              <option>At Risk</option>
+            <select value={regionFilter} onChange={(event) => setRegionFilter(event.target.value)} style={{ padding: '10px 12px', borderRadius: 12, border: '1px solid rgba(148,163,184,0.3)', background: '#fff', minWidth: 180 }}>
+              {regionOptions.map((region) => (
+                <option key={region} value={region}>{region === 'All' ? 'All regions' : region}</option>
+              ))}
             </select>
 
+            <select value={status} onChange={(event) => setStatus(event.target.value)} style={{ padding: '10px 12px', borderRadius: 12, border: '1px solid rgba(148,163,184,0.3)', background: '#fff', minWidth: 160 }}>
+              <option value="All">All status</option>
+              <option value="Healthy">Healthy</option>
+              <option value="Watch">Watch</option>
+              <option value="At Risk">At Risk</option>
+            </select>
           </div>
         </div>
 
@@ -237,41 +239,13 @@ export default function ReportsPage() {
             <table className="table" style={{ minWidth: 820 }}>
               <thead>
                 <tr>
-                  <th>
-                    <button type="button" onClick={() => handleSort('department')} style={{ border: 'none', background: 'transparent', color: 'inherit', fontWeight: 800, cursor: 'pointer', padding: 0 }}>
-                      Department {getSortArrow('department')}
-                    </button>
-                  </th>
-                  <th>
-                    <button type="button" onClick={() => handleSort('region')} style={{ border: 'none', background: 'transparent', color: 'inherit', fontWeight: 800, cursor: 'pointer', padding: 0 }}>
-                      Region {getSortArrow('region')}
-                    </button>
-                  </th>
-                  <th>
-                    <button type="button" onClick={() => handleSort('active')} style={{ border: 'none', background: 'transparent', color: 'inherit', fontWeight: 800, cursor: 'pointer', padding: 0 }}>
-                      Active Staff {getSortArrow('active')}
-                    </button>
-                  </th>
-                  <th>
-                    <button type="button" onClick={() => handleSort('present')} style={{ border: 'none', background: 'transparent', color: 'inherit', fontWeight: 800, cursor: 'pointer', padding: 0 }}>
-                      Present Today {getSortArrow('present')}
-                    </button>
-                  </th>
-                  <th>
-                    <button type="button" onClick={() => handleSort('approvals')} style={{ border: 'none', background: 'transparent', color: 'inherit', fontWeight: 800, cursor: 'pointer', padding: 0 }}>
-                      Pending Approvals {getSortArrow('approvals')}
-                    </button>
-                  </th>
-                  <th>
-                    <button type="button" onClick={() => handleSort('compliance')} style={{ border: 'none', background: 'transparent', color: 'inherit', fontWeight: 800, cursor: 'pointer', padding: 0 }}>
-                      Compliance {getSortArrow('compliance')}
-                    </button>
-                  </th>
-                  <th>
-                    <button type="button" onClick={() => handleSort('status')} style={{ border: 'none', background: 'transparent', color: 'inherit', fontWeight: 800, cursor: 'pointer', padding: 0 }}>
-                      Status {getSortArrow('status')}
-                    </button>
-                  </th>
+                  <th><button type="button" onClick={() => handleSort('department')} style={{ border: 'none', background: 'transparent', color: 'inherit', fontWeight: 800, cursor: 'pointer', padding: 0 }}>Department {getSortArrow('department')}</button></th>
+                  <th><button type="button" onClick={() => handleSort('region')} style={{ border: 'none', background: 'transparent', color: 'inherit', fontWeight: 800, cursor: 'pointer', padding: 0 }}>Region {getSortArrow('region')}</button></th>
+                  <th><button type="button" onClick={() => handleSort('active')} style={{ border: 'none', background: 'transparent', color: 'inherit', fontWeight: 800, cursor: 'pointer', padding: 0 }}>Active Staff {getSortArrow('active')}</button></th>
+                  <th><button type="button" onClick={() => handleSort('present')} style={{ border: 'none', background: 'transparent', color: 'inherit', fontWeight: 800, cursor: 'pointer', padding: 0 }}>Present Today {getSortArrow('present')}</button></th>
+                  <th><button type="button" onClick={() => handleSort('approvals')} style={{ border: 'none', background: 'transparent', color: 'inherit', fontWeight: 800, cursor: 'pointer', padding: 0 }}>Pending Approvals {getSortArrow('approvals')}</button></th>
+                  <th><button type="button" onClick={() => handleSort('compliance')} style={{ border: 'none', background: 'transparent', color: 'inherit', fontWeight: 800, cursor: 'pointer', padding: 0 }}>Compliance {getSortArrow('compliance')}</button></th>
+                  <th><button type="button" onClick={() => handleSort('status')} style={{ border: 'none', background: 'transparent', color: 'inherit', fontWeight: 800, cursor: 'pointer', padding: 0 }}>Status {getSortArrow('status')}</button></th>
                 </tr>
               </thead>
               <tbody>

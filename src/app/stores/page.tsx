@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ConfirmDialog, FeedbackToast } from '@/components/Feedback';
 import { EmptyState, TableSkeleton } from '@/components/Loaders';
 import { fetchStores } from '@/lib/admin-data';
@@ -17,6 +17,10 @@ type Store = {
   localBody: string;
   type: string;
   status: string;
+  latitude?: number;
+  longitude?: number;
+  radiusMeters?: number;
+  locationName?: string;
   isDeleted: boolean;
 };
 type SelectOption = { id: string; value: string; label: string };
@@ -28,6 +32,10 @@ type StoreFormState = {
   district: string;
   pinCode: string;
   localBody: string;
+  latitude: string;
+  longitude: string;
+  radiusMeters: string;
+  geocodeQuery: string;
   type: SelectOption;
   status: SelectOption;
 };
@@ -68,6 +76,10 @@ const emptyStoreForm: StoreFormState = {
   district: '',
   pinCode: '',
   localBody: '',
+  latitude: '',
+  longitude: '',
+  radiusMeters: '100',
+  geocodeQuery: '',
   type: EMPTY_SELECT_OPTION,
   status: EMPTY_SELECT_OPTION,
 };
@@ -120,6 +132,11 @@ export default function StoresPage() {
   const [isDeletingStore, setIsDeletingStore] = useState(false);
   const [isSavingStore, setIsSavingStore] = useState(false);
   const [toast, setToast] = useState<{ title: string; description: string; type: 'success' | 'error' } | null>(null);
+  const [isGeoLoading, setIsGeoLoading] = useState(false);
+  const [geoError, setGeoError] = useState('');
+  const [locationSuggestions, setLocationSuggestions] = useState<Array<{ label: string; latitude: number; longitude: number }>>([]);
+  const [isSuggestionSelected, setIsSuggestionSelected] = useState(false);
+  const suggestionRequestIdRef = useRef(0);
   const [form, setForm] = useState<StoreFormState>({
     ...emptyStoreForm,
   });
@@ -188,6 +205,274 @@ export default function StoresPage() {
     });
   }, []);
 
+  const parseRadiusValue = (value: string) => {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : 0;
+  };
+
+  const reverseGeocodeLocation = useCallback(async (latitude: number, longitude: number) => {
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+      return;
+    }
+
+    const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+    const geocodeUrl = apiKey
+      ? `https://maps.googleapis.com/maps/api/geocode/json?latlng=${latitude},${longitude}&key=${encodeURIComponent(apiKey)}`
+      : `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}`;
+
+    try {
+      const response = await fetch(geocodeUrl, {
+        headers: {
+          Accept: 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error('Reverse geocoding failed.');
+      }
+
+      const payload = await response.json();
+      const addressName = apiKey
+        ? payload?.results?.[0]?.formatted_address
+        : payload?.display_name;
+
+      const safeName = typeof addressName === 'string' && addressName.trim() ? addressName.trim() : '';
+      if (safeName) {
+        setIsSuggestionSelected(true);
+        setForm((current) => ({
+          ...current,
+          geocodeQuery: safeName,
+        }));
+      }
+    } catch {
+      setGeoError('Unable to resolve the selected location name. You can still keep the coordinates and address values manually.');
+    }
+  }, []);
+
+  const updateGeoCoordinates = useCallback((latitude: number, longitude: number, locationName?: string) => {
+    const nextLocationName = locationName?.trim();
+
+    setForm((current) => ({
+      ...current,
+      latitude: Number.isFinite(latitude) ? latitude.toFixed(6) : '',
+      longitude: Number.isFinite(longitude) ? longitude.toFixed(6) : '',
+      geocodeQuery: nextLocationName || current.geocodeQuery,
+    }));
+
+    if (nextLocationName) {
+      return;
+    }
+
+    if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
+      void reverseGeocodeLocation(latitude, longitude);
+    }
+
+    setGeoError('');
+  }, [reverseGeocodeLocation]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+    if (!apiKey || !document.getElementById('store-location-search')) {
+      return;
+    }
+
+    const initAutocomplete = () => {
+      const input = document.getElementById('store-location-search') as HTMLInputElement | null;
+      if (!input || typeof window === 'undefined' || !(window as any).google?.maps?.places) {
+        return;
+      }
+
+      const autocomplete = new (window as any).google.maps.places.Autocomplete(input, {
+        types: ['geocode', 'establishment'],
+        fields: ['formatted_address', 'geometry', 'name', 'place_id'],
+      });
+
+      autocomplete.addListener('place_changed', () => {
+        const place = autocomplete.getPlace();
+        const locationName = place?.formatted_address || place?.name || '';
+        const lat = place?.geometry?.location?.lat?.();
+        const lng = place?.geometry?.location?.lng?.();
+
+        if (typeof lat === 'number' && typeof lng === 'number') {
+          updateGeoCoordinates(lat, lng, locationName || form.geocodeQuery);
+        }
+
+        if (locationName) {
+          setForm((current) => ({ ...current, geocodeQuery: locationName }));
+        }
+      });
+    };
+
+    if ((window as any).google?.maps?.places) {
+      initAutocomplete();
+      return;
+    }
+
+    const scriptId = 'google-places-autocomplete-script';
+    if (!document.getElementById(scriptId)) {
+      const script = document.createElement('script');
+      script.id = scriptId;
+      script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&libraries=places`;
+      script.async = true;
+      script.defer = true;
+      script.onload = () => initAutocomplete();
+      document.head.appendChild(script);
+    }
+  }, [form.geocodeQuery, updateGeoCoordinates]);
+
+  const handleDetectLocation = useCallback(() => {
+    if (typeof navigator === 'undefined' || !('geolocation' in navigator)) {
+      setGeoError('Geolocation is not supported on this browser.');
+      return;
+    }
+
+    setIsGeoLoading(true);
+    setGeoError('');
+    setLocationSuggestions([]);
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setIsSuggestionSelected(true);
+        setForm((current) => ({
+          ...current,
+          geocodeQuery: current.geocodeQuery || 'Current location',
+        }));
+        updateGeoCoordinates(position.coords.latitude, position.coords.longitude, 'Current location');
+        setIsGeoLoading(false);
+      },
+      () => {
+        setGeoError('Unable to detect your current location. You can still enter coordinates manually.');
+        setIsGeoLoading(false);
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 300000 },
+    );
+  }, [updateGeoCoordinates]);
+
+  const fetchLocationSuggestions = useCallback(async (queryText: string) => {
+    const trimmedQuery = queryText.trim();
+    if (!trimmedQuery || trimmedQuery.length < 2) {
+      setLocationSuggestions([]);
+      return;
+    }
+
+    const requestId = Date.now() + Math.random();
+    suggestionRequestIdRef.current = requestId;
+
+    try {
+      const googleApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+      const endpoint = googleApiKey
+        ? `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(trimmedQuery)}&key=${encodeURIComponent(googleApiKey)}`
+        : `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=5&q=${encodeURIComponent(trimmedQuery)}`;
+
+      const response = await fetch(endpoint, {
+        headers: {
+          Accept: 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error('Location suggestion lookup failed.');
+      }
+
+      const payload = await response.json();
+      const results = Array.isArray(payload?.results) ? payload.results : Array.isArray(payload) ? payload : [];
+
+      const suggestions = results
+        .map((result: any) => {
+          const label = String(result?.formatted_address ?? result?.display_name ?? result?.name ?? '').trim();
+          const latitude = Number(result?.geometry?.location?.lat ?? result?.lat ?? result?.latitude ?? 0);
+          const longitude = Number(result?.geometry?.location?.lng ?? result?.lon ?? result?.longitude ?? 0);
+
+          if (!label || !Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+            return null;
+          }
+
+          return {
+            label,
+            latitude,
+            longitude,
+          };
+        })
+        .filter(Boolean) as Array<{ label: string; latitude: number; longitude: number }>;
+
+      if (requestId !== suggestionRequestIdRef.current) {
+        return;
+      }
+
+      setLocationSuggestions(suggestions.slice(0, 5));
+    } catch {
+      if (requestId !== suggestionRequestIdRef.current) {
+        return;
+      }
+      setLocationSuggestions([]);
+    }
+  }, []);
+
+  const handleLocationInputChange = useCallback((value: string) => {
+    setIsSuggestionSelected(false);
+    setForm((current) => ({ ...current, geocodeQuery: value }));
+    if (!value.trim()) {
+      setLocationSuggestions([]);
+      return;
+    }
+
+    void fetchLocationSuggestions(value);
+  }, [fetchLocationSuggestions]);
+
+  const handleSearchLocation = useCallback(async () => {
+    const queryText = form.geocodeQuery.trim();
+    if (!queryText) {
+      setGeoError('Enter a location name or address to search.');
+      return;
+    }
+
+    setIsGeoLoading(true);
+    setGeoError('');
+
+    try {
+      const googleApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+      const endpoint = googleApiKey
+        ? `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(queryText)}&key=${encodeURIComponent(googleApiKey)}`
+        : `https://nominatim.openstreetmap.org/search?format=jsonv2&q=${encodeURIComponent(queryText)}`;
+
+      const response = await fetch(endpoint, {
+        headers: {
+          Accept: 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error('Location lookup failed.');
+      }
+
+      const payload = await response.json();
+      const result = Array.isArray(payload?.results) ? payload.results[0] : Array.isArray(payload) ? payload[0] : null;
+      const latitude = Number(result?.geometry?.location?.lat ?? result?.lat ?? result?.latitude ?? 0);
+      const longitude = Number(result?.geometry?.location?.lng ?? result?.lon ?? result?.longitude ?? 0);
+      const locationName = String(result?.formatted_address ?? result?.display_name ?? result?.name ?? queryText).trim();
+
+      if (!Number.isFinite(latitude) || !Number.isFinite(longitude) || latitude === 0 || longitude === 0) {
+        throw new Error('No matching location found for this search.');
+      }
+
+      updateGeoCoordinates(latitude, longitude, locationName || queryText);
+      setIsSuggestionSelected(true);
+      setForm((current) => ({
+        ...current,
+        geocodeQuery: locationName || queryText,
+      }));
+      setLocationSuggestions([]);
+    } catch {
+      setGeoError('No result was found for that location. Try a more specific address or enter coordinates manually.');
+    } finally {
+      setIsGeoLoading(false);
+    }
+  }, [form.geocodeQuery, updateGeoCoordinates]);
+
   const loadStores = useCallback(async () => {
     setIsLoading(true);
     setHasError(false);
@@ -216,6 +501,25 @@ export default function StoresPage() {
 
     const nextType = form.type?.value ?? '';
     const nextStatus = form.status?.value ?? '';
+    const latitudeValue = Number(form.latitude);
+    const longitudeValue = Number(form.longitude);
+    const radiusValue = parseRadiusValue(form.radiusMeters);
+
+    if (form.latitude.trim() && (!Number.isFinite(latitudeValue) || latitudeValue < -90 || latitudeValue > 90)) {
+      showToast('Latitude must be a valid value between -90 and 90.', 'error');
+      return;
+    }
+
+    if (form.longitude.trim() && (!Number.isFinite(longitudeValue) || longitudeValue < -180 || longitudeValue > 180)) {
+      showToast('Longitude must be a valid value between -180 and 180.', 'error');
+      return;
+    }
+
+    if (!Number.isFinite(radiusValue) || radiusValue < 0) {
+      showToast('Geofence radius must be a valid distance in meters.', 'error');
+      return;
+    }
+
     const normalizedStore = {
       name: form.name.trim(),
       locality: form.locality.trim(),
@@ -223,6 +527,10 @@ export default function StoresPage() {
       district: form.district.trim(),
       pinCode: form.pinCode.trim(),
       localBody: form.localBody.trim(),
+      latitude: form.latitude.trim() ? latitudeValue : undefined,
+      longitude: form.longitude.trim() ? longitudeValue : undefined,
+      radiusMeters: radiusValue,
+      locationName: form.geocodeQuery.trim() || undefined,
       type: nextType,
       status: nextStatus,
     };
@@ -276,6 +584,10 @@ export default function StoresPage() {
       district: store.district ?? '',
       pinCode: store.pinCode ?? '',
       localBody: store.localBody ?? '',
+      latitude: store.latitude != null ? String(store.latitude) : '',
+      longitude: store.longitude != null ? String(store.longitude) : '',
+      radiusMeters: store.radiusMeters != null ? String(store.radiusMeters) : '100',
+      geocodeQuery: store.locationName ?? '',
       type: toSelectOption(storeTypeOptions, store.type, EMPTY_SELECT_OPTION),
       status: toSelectOption(storeStatusOptions, store.status, EMPTY_SELECT_OPTION),
     });
@@ -321,7 +633,7 @@ export default function StoresPage() {
   };
 
   return (
-    <main style={{ maxWidth: 1280, margin: '0 auto', padding: 28 }}>
+    <main className="portal-page">
       {toast && <FeedbackToast title={toast.title} description={toast.description} type={toast.type} onClose={() => setToast(null)} durationMs={2800} />}
       <ConfirmDialog
         open={Boolean(pendingDeleteStore)}
@@ -377,6 +689,99 @@ export default function StoresPage() {
                 <input value={form.localBody} onChange={(event) => setForm((current) => ({ ...current, localBody: event.target.value }))} style={{ padding: '10px 12px', borderRadius: 10, border: `1px solid ${formErrors.localBody ? '#b91c1c' : 'rgba(148,163,184,0.35)'}`, background: 'rgba(255,255,255,0.42)' }} />
                 {formErrors.localBody && <span style={{ color: '#b91c1c', fontSize: 12, marginTop: 2 }}>{formErrors.localBody}</span>}
               </label>
+
+              <div style={{ display: 'grid', gap: 10, border: '1px solid rgba(148,163,184,0.25)', borderRadius: 12, padding: 14, background: 'rgba(255,255,255,0.35)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                  <div style={{ fontWeight: 800, color: '#0f172a' }}>Geo location</div>
+                  <button type="button" onClick={handleDetectLocation} disabled={isGeoLoading} style={{ padding: '8px 10px', borderRadius: 8, background: '#e0f2fe', color: '#075985', border: 'none', fontWeight: 700, cursor: isGeoLoading ? 'not-allowed' : 'pointer', opacity: isGeoLoading ? 0.7 : 1 }}>
+                    {isGeoLoading ? 'Detecting...' : 'Use my location'}
+                  </button>
+                </div>
+
+                <div style={{ display: 'grid', gap: 8 }}>
+                  <label style={{ display: 'grid', gap: 6, color: '#475569', fontWeight: 700 }}>
+                    Search location name or address
+                    <div style={{ display: 'grid', gap: 6 }}>
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                        <input id="store-location-search" value={form.geocodeQuery} onChange={(event) => handleLocationInputChange(event.target.value)} placeholder="Search nearby shop name, landmark or address" style={{ flex: 1, minWidth: 180, padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(148,163,184,0.35)', background: 'rgba(255,255,255,0.42)' }} />
+                        <button type="button" onClick={() => void handleSearchLocation()} style={{ padding: '10px 12px', borderRadius: 10, background: '#0f172a', color: '#fff', border: 'none', fontWeight: 700, cursor: 'pointer' }}>
+                          Search
+                        </button>
+                      </div>
+
+                      {locationSuggestions.length > 0 && (
+                        <div style={{ display: 'grid', gap: 4, border: '1px solid rgba(148,163,184,0.25)', borderRadius: 10, background: '#fff', boxShadow: '0 10px 30px rgba(15, 23, 42, 0.08)', overflow: 'hidden' }}>
+                          {locationSuggestions.map((suggestion) => (
+                            <button
+                              key={`${suggestion.label}-${suggestion.latitude}-${suggestion.longitude}`}
+                              type="button"
+                              onClick={() => {
+                                setIsSuggestionSelected(true);
+                                setForm((current) => ({ ...current, geocodeQuery: suggestion.label }));
+                                updateGeoCoordinates(suggestion.latitude, suggestion.longitude, suggestion.label);
+                                setLocationSuggestions([]);
+                              }}
+                              style={{
+                                display: 'block',
+                                width: '100%',
+                                textAlign: 'left',
+                                padding: '10px 12px',
+                                border: 'none',
+                                background: 'white',
+                                color: '#0f172a',
+                                cursor: 'pointer',
+                                fontSize: 14,
+                              }}
+                            >
+                              {suggestion.label}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </label>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+                  <label style={{ display: 'grid', gap: 6, color: '#475569', fontWeight: 700 }}>
+                    Latitude
+                    <input value={form.latitude} onChange={(event) => {
+                      const nextLatitude = event.target.value;
+                      setForm((current) => ({ ...current, latitude: nextLatitude }));
+
+                      const latitudeValue = Number(nextLatitude);
+                      const longitudeValue = Number(form.longitude);
+
+                      if (Number.isFinite(latitudeValue) && Number.isFinite(longitudeValue) && Math.abs(latitudeValue) <= 90 && Math.abs(longitudeValue) <= 180) {
+                        void reverseGeocodeLocation(latitudeValue, longitudeValue);
+                      }
+                    }} placeholder="12.9716" style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(148,163,184,0.35)', background: 'rgba(255,255,255,0.42)' }} />
+                  </label>
+
+                  <label style={{ display: 'grid', gap: 6, color: '#475569', fontWeight: 700 }}>
+                    Longitude
+                    <input value={form.longitude} onChange={(event) => {
+                      const nextLongitude = event.target.value;
+                      setForm((current) => ({ ...current, longitude: nextLongitude }));
+
+                      const latitudeValue = Number(form.latitude);
+                      const longitudeValue = Number(nextLongitude);
+
+                      if (Number.isFinite(latitudeValue) && Number.isFinite(longitudeValue) && Math.abs(latitudeValue) <= 90 && Math.abs(longitudeValue) <= 180) {
+                        void reverseGeocodeLocation(latitudeValue, longitudeValue);
+                      }
+                    }} placeholder="77.5946" style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(148,163,184,0.35)', background: 'rgba(255,255,255,0.42)' }} />
+                  </label>
+
+                  <label style={{ display: 'grid', gap: 6, color: '#475569', fontWeight: 700 }}>
+                    Geofence radius (meters)
+                    <input type="number" min="0" step="10" value={form.radiusMeters} onChange={(event) => setForm((current) => ({ ...current, radiusMeters: event.target.value }))} placeholder="100" style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(148,163,184,0.35)', background: 'rgba(255,255,255,0.42)' }} />
+                  </label>
+                </div>
+
+                {geoError && <div style={{ color: '#b91c1c', fontSize: 12 }}>{geoError}</div>}
+                <div style={{ color: '#64748b', fontSize: 12, lineHeight: 1.5 }}>This geofence is used to allow mobile check-in only when users are physically present at the shop location. If they are outside the premises, the app will prompt: “Please be present on shop to login.”</div>
+              </div>
 
               <label style={{ display: 'grid', gap: 8, color: '#475569', fontWeight: 700 }}>
                 Store type

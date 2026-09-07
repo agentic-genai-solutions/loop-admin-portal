@@ -137,25 +137,30 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
 
   const pageMeta = useMemo(() => {
     const currentPath = pathname || '/';
+    if (currentPath === '/attendance/timing') return { eyebrow: 'Workforce', title: 'Attendance timing' };
+    if (currentPath === '/incentives' || currentPath.startsWith('/incentives/')) {
+      return { eyebrow: 'Incentives', title: currentPath.startsWith('/incentives/programs') ? 'Programs' : currentPath.startsWith('/incentives/entries') ? 'Employee rewards' : 'Overview' };
+    }
+
 
     if (currentPath.startsWith('/master-data/roles')) {
-      return { eyebrow: 'Master Data', title: 'Master Data - Roles' };
+      return { eyebrow: 'Master Data', title: 'Roles' };
     }
 
     if (currentPath.startsWith('/master-data/designations')) {
-      return { eyebrow: 'Master Data', title: 'Master Data - Designations' };
+      return { eyebrow: 'Master Data', title: 'Designations' };
     }
 
     if (currentPath.startsWith('/master-data/access-delegation')) {
-      return { eyebrow: 'Master Data', title: 'Master Data - Access Delegation' };
+      return { eyebrow: 'Master Data', title: 'Access Delegation' };
     }
 
     if (currentPath.startsWith('/master-data/schedules')) {
-      return { eyebrow: 'Master Data', title: 'Master Data - Schedules' };
+      return { eyebrow: 'Master Data', title: 'Schedules' };
     }
 
     if (currentPath.startsWith('/master-data/leave-categories')) {
-      return { eyebrow: 'Master Data', title: 'Master Data - Leave Categories' };
+      return { eyebrow: 'Master Data', title: 'Leave Categories' };
     }
 
     if (currentPath.startsWith('/master-data')) {
@@ -175,11 +180,16 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
       '/incentives': 'Incentives',
       '/reports': 'Reports',
       '/stores': 'Store Management',
-      '/finance': 'Finance',
+      '/finance': 'Payroll management',
+      '/messages': 'Messages',
       '/profile': 'Profile',
     };
 
-    return { eyebrow: 'Overview', title: routeMap[currentPath] || 'Overview' };
+    const section = currentPath === '/finance' ? 'Finance' : currentPath.startsWith('/master-data') ? 'Master Data'
+      : ['/attendance', '/roster', '/employees'].includes(currentPath) ? 'Workforce'
+      : ['/users', '/onboarding', '/workflow'].includes(currentPath) ? 'Onboarding'
+      : currentPath === '/' ? 'Workspace' : 'Admin';
+    return { eyebrow: section, title: routeMap[currentPath] || 'Overview' };
   }, [pathname]);
 
   if (isPublicPage) {

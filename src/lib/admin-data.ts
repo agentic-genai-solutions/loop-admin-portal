@@ -103,6 +103,12 @@ export async function fetchStores() {
       return normalizeText(value);
     };
 
+    const latitude = Number(store.latitude ?? store.lat ?? address.latitude ?? address.lat ?? 0);
+    const longitude = Number(store.longitude ?? store.lng ?? address.longitude ?? address.lng ?? 0);
+    const radiusMeters = Number(store.radiusMeters ?? store.geoRadiusMeters ?? store.radius ?? store.geofenceRadius ?? address.radiusMeters ?? address.geofenceRadius ?? 0);
+
+    const locationName = normalizeText(store.locationName ?? store.location ?? address.locationName ?? address.formattedAddress ?? address.name ?? store.addressName ?? store.address?.formattedAddress ?? store.address?.locationName);
+
     return {
       id: store._id ?? store.id ?? index + 1,
       name: store.name ?? `Store ${index + 1}`,
@@ -114,66 +120,183 @@ export async function fetchStores() {
       type: normalizeOptionValue(store.type ?? address.type) || 'Retail',
       manager: normalizeText(store.manager ?? address.manager),
       status: store.isActive === false ? 'Inactive' : normalizeOptionValue(store.status ?? address.status) || 'Operational',
+      latitude: Number.isFinite(latitude) ? latitude : 0,
+      longitude: Number.isFinite(longitude) ? longitude : 0,
+      radiusMeters: Number.isFinite(radiusMeters) ? radiusMeters : 100,
+      locationName,
       isDeleted: Boolean(store.isDeleted || store.deletedAt),
     };
   });
 }
 
-type ReportRow = { department: string; region: string; active: number; present: number; approvals: number; compliance: string; status: string };
+type ReportRow = { department: string; region: string; active: number; present: number; approvals: number; compliance: string; status: 'Healthy' | 'Watch' | 'At Risk' };
+
+function toNumber(value: unknown, fallback = 0) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : fallback;
+}
+
+function normalizeStatus(value: unknown, complianceValue: number): ReportRow['status'] {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  if (['healthy', 'good', 'on-track', 'stable'].includes(normalized)) return 'Healthy';
+  if (['watch', 'warning', 'attention', 'at-risk'].includes(normalized)) return 'Watch';
+  if (['at risk', 'critical', 'danger', 'risk'].includes(normalized)) return 'At Risk';
+  if (complianceValue >= 90) return 'Healthy';
+  if (complianceValue >= 75) return 'Watch';
+  return 'At Risk';
+}
+
+function normalizeCompliance(value: unknown, fallback = 0) {
+  const numeric = toNumber(value, fallback);
+  if (numeric > 1 && numeric <= 100) return `${numeric.toFixed(0)}%`;
+  if (numeric > 0 && numeric <= 1) return `${(numeric * 100).toFixed(0)}%`;
+  return `${fallback.toFixed(0)}%`;
+}
+
+function normalizeReportRow(entry: Record<string, any>): ReportRow | null {
+  if (!entry || typeof entry !== 'object') return null;
+
+  const department = String(entry.department ?? entry.departmentName ?? entry.team ?? entry.branch ?? entry.storeName ?? 'Operations').trim() || 'Operations';
+  const region = String(entry.region ?? entry.location ?? entry.area ?? entry.zone ?? entry.storeRegion ?? 'Head Office').trim() || 'Head Office';
+  const active = Math.max(0, Math.round(toNumber(entry.active ?? entry.activeStaff ?? entry.activeEmployees ?? entry.totalEmployees ?? entry.staffCount ?? 0, 0)));
+  const present = Math.max(0, Math.round(toNumber(entry.present ?? entry.presentToday ?? entry.presentEmployees ?? entry.presentCount ?? 0, 0)));
+  const approvals = Math.max(0, Math.round(toNumber(entry.approvals ?? entry.pendingApprovals ?? entry.pending ?? entry.approvalCount ?? entry.pendingActionCount ?? 0, 0)));
+  const complianceValue = Math.max(0, Math.min(100, toNumber(entry.compliance ?? entry.complianceRate ?? entry.attendanceRate ?? entry.rate ?? 0, 0)));
+  const compliance = normalizeCompliance(complianceValue, complianceValue);
+
+  return {
+    department,
+    region,
+    active,
+    present,
+    approvals,
+    compliance,
+    status: normalizeStatus(entry.status, complianceValue),
+  };
+}
 
 export async function fetchReports() {
   const emptyAttendance = { totalEmployees: 0, present: 0, late: 0, absent: 0, attendanceRate: 0 };
   const emptyLeave = { totalLeaveRequests: 0, approved: 0, pending: 0, rejected: 0 };
   const emptyPayroll = { totalPayroll: 0, totalSundayExtraPay: 0, approved: 0, pending: 0, paid: 0 };
 
-  const [attendance, leave, payroll] = await Promise.all([
-    apiFetchWithRetry<{ attendanceRate?: number; present?: number; totalEmployees?: number; late?: number; absent?: number }>('/director/reports/attendance'),
-    apiFetchWithRetry<{ totalLeaveRequests?: number; approved?: number; pending?: number; rejected?: number }>('/director/reports/leave'),
-    apiFetchWithRetry<{ totalPayroll?: number; totalSundayExtraPay?: number; approved?: number; pending?: number; paid?: number }>('/director/reports/payroll'),
+  const [attendance, leave, payroll, reportSummary, reportFallback] = await Promise.all([
+    apiFetchWithRetry<{ attendanceRate?: number; present?: number; totalEmployees?: number; late?: number; absent?: number; data?: any; rows?: any[] }>('/director/reports/attendance').catch(() => null),
+    apiFetchWithRetry<{ totalLeaveRequests?: number; approved?: number; pending?: number; rejected?: number; data?: any; rows?: any[] }>('/director/reports/leave').catch(() => null),
+    apiFetchWithRetry<{ totalPayroll?: number; totalSundayExtraPay?: number; approved?: number; pending?: number; paid?: number; data?: any; rows?: any[] }>('/director/reports/payroll').catch(() => null),
+    apiFetchWithRetry<any>('/director/reports').catch(() => null),
+    apiFetchWithRetry<any>('/reports').catch(() => null),
   ]);
+
+  const combinedSources = [attendance, leave, payroll, reportSummary, reportFallback];
+  let rows: ReportRow[] = [];
+
+  for (const source of combinedSources) {
+    if (!source) continue;
+
+    const candidateRows = Array.isArray(source.rows)
+      ? source.rows
+      : Array.isArray(source.data?.rows)
+        ? source.data.rows
+        : Array.isArray(source.data)
+          ? source.data
+          : [];
+
+    if (candidateRows.length) {
+      rows = candidateRows
+        .map((entry: Record<string, any>) => normalizeReportRow(entry))
+        .filter((entry: ReportRow | null): entry is ReportRow => Boolean(entry));
+      break;
+    }
+  }
+
+  const attendanceData = attendance?.data ?? attendance ?? {};
+  const leaveData = leave?.data ?? leave ?? {};
+  const payrollData = payroll?.data ?? payroll ?? {};
+
+  const attendanceRate = toNumber(attendanceData.attendanceRate ?? attendance?.attendanceRate ?? 0, 0);
+  const leaveRequests = toNumber(leaveData.totalLeaveRequests ?? leave?.totalLeaveRequests ?? 0, 0);
+  const payrollTotal = toNumber(payrollData.totalPayroll ?? payroll?.totalPayroll ?? 0, 0);
+  const pendingActions = Math.max(0, toNumber(payrollData.pending ?? payroll?.pending ?? 0, 0) + toNumber(leaveData.pending ?? leave?.pending ?? 0, 0));
 
   return {
     attendance: {
-      totalEmployees: attendance?.totalEmployees ?? emptyAttendance.totalEmployees,
-      present: attendance?.present ?? emptyAttendance.present,
-      late: attendance?.late ?? emptyAttendance.late,
-      absent: attendance?.absent ?? emptyAttendance.absent,
-      attendanceRate: attendance?.attendanceRate ?? emptyAttendance.attendanceRate,
+      totalEmployees: toNumber(attendanceData.totalEmployees ?? attendance?.totalEmployees ?? 0, 0),
+      present: toNumber(attendanceData.present ?? attendance?.present ?? 0, 0),
+      late: toNumber(attendanceData.late ?? attendance?.late ?? 0, 0),
+      absent: toNumber(attendanceData.absent ?? attendance?.absent ?? 0, 0),
+      attendanceRate,
     },
     leave: {
-      totalLeaveRequests: leave?.totalLeaveRequests ?? emptyLeave.totalLeaveRequests,
-      approved: leave?.approved ?? emptyLeave.approved,
-      pending: leave?.pending ?? emptyLeave.pending,
-      rejected: leave?.rejected ?? emptyLeave.rejected,
+      totalLeaveRequests: leaveRequests,
+      approved: toNumber(leaveData.approved ?? leave?.approved ?? 0, 0),
+      pending: toNumber(leaveData.pending ?? leave?.pending ?? 0, 0),
+      rejected: toNumber(leaveData.rejected ?? leave?.rejected ?? 0, 0),
     },
     payroll: {
-      totalPayroll: payroll?.totalPayroll ?? emptyPayroll.totalPayroll,
-      totalSundayExtraPay: payroll?.totalSundayExtraPay ?? emptyPayroll.totalSundayExtraPay,
-      approved: payroll?.approved ?? emptyPayroll.approved,
-      pending: payroll?.pending ?? emptyPayroll.pending,
-      paid: payroll?.paid ?? emptyPayroll.paid,
+      totalPayroll: payrollTotal,
+      totalSundayExtraPay: toNumber(payrollData.totalSundayExtraPay ?? payroll?.totalSundayExtraPay ?? 0, 0),
+      approved: toNumber(payrollData.approved ?? payroll?.approved ?? 0, 0),
+      pending: toNumber(payrollData.pending ?? payroll?.pending ?? 0, 0),
+      paid: toNumber(payrollData.paid ?? payroll?.paid ?? 0, 0),
     },
-    rows: [] as ReportRow[],
+    summary: {
+      attendanceRate,
+      leaveUtilization: leaveRequests > 0 ? Math.min(100, (toNumber(leaveData.approved ?? leave?.approved ?? 0, 0) / leaveRequests) * 100) : 0,
+      payrollTotal,
+      pendingActions,
+    },
+    rows,
   };
 }
 
 export async function fetchIncentives() {
   const [payroll, programs, entries] = await Promise.all([
-    apiFetchWithRetry<{ totalPayroll?: number; paid?: number; pending?: number }>('/director/reports/payroll'),
-    apiFetchWithRetry<Array<any>>('/incentives/programs'),
-    apiFetchWithRetry<Array<any>>('/incentives/entries'),
+    apiFetchWithRetry<{ totalPayroll?: number; paid?: number; pending?: number }>('/director/reports/payroll').catch(() => ({ totalPayroll: 0, paid: 0, pending: 0 })),
+    apiFetchWithRetry<Array<any>>('/incentives/programs').catch(() => []),
+    apiFetchWithRetry<Array<any>>('/incentives/entries').catch(() => []),
   ]);
 
   const programList = Array.isArray(programs) ? programs : [];
   const entryList = Array.isArray(entries) ? entries : [];
 
+  const safeAmount = Number.isFinite(Number(payroll?.totalPayroll)) ? Number(payroll.totalPayroll) : 0;
+  const activePrograms = programList.filter((program) => String(program.status ?? '').toLowerCase() === 'active').length;
+  const approvedEntries = entryList.filter((entry) => String(entry.status ?? '').toLowerCase() === 'approved').length;
+  const totalEntries = entryList.length || 1;
+  const approvalRate = entryList.length > 0 ? Math.max(0, Math.min(100, Math.round((approvedEntries / totalEntries) * 100))) : 0;
+
   return {
-    programs: programList,
-    entries: entryList,
+    programs: programList.map((program) => ({
+      id: String(program.id ?? `${program.name ?? 'program'}-${Math.random()}`),
+      name: String(program.name ?? 'Untitled Program'),
+      type: String(program.type ?? program.category ?? 'Sales'),
+      payout: String(program.payout ?? `$${Number(program.amount ?? 0).toLocaleString()}`),
+      target: String(program.target ?? program.targetValue ?? 'Configured target'),
+      status: String(program.status ?? 'Active'),
+      category: String(program.category ?? program.type ?? 'Sales'),
+      frequency: String(program.frequency ?? 'Monthly'),
+      amount: Number(program.amount ?? 0),
+      currency: String(program.currency ?? 'USD'),
+      guideline: String(program.guideline ?? 'Set the rule for this incentive.'),
+      stores: Array.isArray(program.stores) ? program.stores : ['All Stores'],
+      employees: Array.isArray(program.employees) ? program.employees : ['All Employees'],
+      notification: String(program.notification ?? 'In-app'),
+      targetMetric: String(program.targetMetric ?? 'Performance target'),
+      targetValue: String(program.targetValue ?? 'Configured value'),
+    })),
+    entries: entryList.map((entry) => ({
+      employee: String(entry.employee ?? 'Employee'),
+      store: String(entry.store ?? 'All Stores'),
+      program: String(entry.program ?? 'Program'),
+      amount: String(entry.amount ?? '$0'),
+      period: String(entry.period ?? 'Current cycle'),
+      status: String(entry.status ?? 'Pending'),
+    })),
     summary: {
-      monthlyPayout: payroll?.totalPayroll ? `$${(payroll.totalPayroll / 10).toLocaleString()}` : '$0',
-      activePrograms: programList.filter((program) => program.status === 'Active').length,
-      approvalRate: '0%',
+      monthlyPayout: safeAmount ? `$${safeAmount.toLocaleString()}` : '$0',
+      activePrograms,
+      approvalRate: `${approvalRate}%`,
       staffEntries: entryList.length,
     },
   };

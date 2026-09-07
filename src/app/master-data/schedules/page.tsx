@@ -589,7 +589,7 @@ export default function SchedulesMasterDataPage() {
   }, [designationFilter, designationLabelById, parseTimeToMinutes, records, searchQuery, sortDirection, sortField, statusFilter, storeLabelById]);
 
   return (
-    <main style={{ maxWidth: 1280, margin: '0 auto', padding: 28, display: 'grid', gap: 20 }}>
+    <main className="portal-page portal-page-grid" style={{ display: 'grid', gap: 20 }}>
       {toast && (
         <FeedbackToast
           title={toast.title}
@@ -678,7 +678,7 @@ export default function SchedulesMasterDataPage() {
               <div style={{ marginTop: 14, display: 'grid', gap: 10 }}>
                 {formErrors.breaks && <small style={inlineFieldErrorStyle}>{formErrors.breaks}</small>}
                 {form.breaks.map((item, index) => (
-                  <div key={`${index}-${item.label}-${item.startTime}-${item.endTime}`} style={{ display: 'grid', gridTemplateColumns: 'minmax(180px, 1fr) minmax(140px, 1fr) minmax(140px, 1fr) auto', gap: 10, alignItems: 'center' }}>
+                  <div key={`${index}-${item.label}-${item.startTime}-${item.endTime}`} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 140px), 1fr))', gap: 10, alignItems: 'center' }}>
                     <div style={{ display: 'grid', gap: 4 }}>
                       <input
                         placeholder={`Break Label ${index + 1}`}
@@ -732,7 +732,7 @@ export default function SchedulesMasterDataPage() {
 
       <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
         <div style={{ padding: 20, borderBottom: '1px solid rgba(148,163,184,0.18)', display: 'grid', gap: 14 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(220px, 1.2fr) repeat(4, minmax(140px, 1fr)) auto', gap: 10, alignItems: 'center' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 160px), 1fr))', gap: 10, alignItems: 'center' }}>
             <input
               placeholder="Search schedules"
               value={searchQuery}

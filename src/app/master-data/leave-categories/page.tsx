@@ -343,7 +343,7 @@ export default function LeaveCategoriesMasterDataPage() {
   };
 
   return (
-    <main style={{ maxWidth: 1280, margin: '0 auto', padding: 28, display: 'grid', gap: 20 }}>
+    <main className="portal-page portal-page-grid" style={{ display: 'grid', gap: 20 }}>
       {toast && (
         <FeedbackToast
           title={toast.title}

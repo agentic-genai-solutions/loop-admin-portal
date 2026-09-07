@@ -137,3 +137,55 @@ export function formatName(firstName?: string, lastName?: string) {
 export function buildSkeletonRows(count: number) {
   return Array.from({ length: count }, (_, index) => index);
 }
+
+const EARTH_RADIUS_METERS = 6371000;
+
+export function haversineDistanceMeters(startLatitude: number, startLongitude: number, endLatitude: number, endLongitude: number) {
+  const lat1 = (startLatitude * Math.PI) / 180;
+  const lat2 = (endLatitude * Math.PI) / 180;
+  const deltaLat = ((endLatitude - startLatitude) * Math.PI) / 180;
+  const deltaLon = ((endLongitude - startLongitude) * Math.PI) / 180;
+
+  const a = Math.sin(deltaLat / 2) * Math.sin(deltaLat / 2)
+    + Math.cos(lat1) * Math.cos(lat2)
+    * Math.sin(deltaLon / 2) * Math.sin(deltaLon / 2);
+
+  return 2 * EARTH_RADIUS_METERS * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+export function isWithinGeofence(
+  currentLatitude: number,
+  currentLongitude: number,
+  storeLatitude: number,
+  storeLongitude: number,
+  radiusMeters = 100,
+) {
+  if (!Number.isFinite(currentLatitude) || !Number.isFinite(currentLongitude)) {
+    return false;
+  }
+
+  if (!Number.isFinite(storeLatitude) || !Number.isFinite(storeLongitude)) {
+    return false;
+  }
+
+  const distance = haversineDistanceMeters(currentLatitude, currentLongitude, storeLatitude, storeLongitude);
+  return distance <= Math.max(0, radiusMeters);
+}
+
+export function getGeofenceCheckInResult(
+  currentLatitude: number,
+  currentLongitude: number,
+  storeLatitude: number,
+  storeLongitude: number,
+  radiusMeters = 100,
+) {
+  const distanceMeters = haversineDistanceMeters(currentLatitude, currentLongitude, storeLatitude, storeLongitude);
+  const isAllowed = isWithinGeofence(currentLatitude, currentLongitude, storeLatitude, storeLongitude, radiusMeters);
+
+  return {
+    allowed: isAllowed,
+    distanceMeters,
+    radiusMeters: Math.max(0, radiusMeters),
+    message: isAllowed ? 'Check-in allowed.' : 'Please be present on shop to login.',
+  };
+}

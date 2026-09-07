@@ -346,7 +346,7 @@ export default function RolesMasterDataPage() {
   };
 
   return (
-    <main style={{ maxWidth: 1400, margin: '0 auto', padding: 28 }}>
+    <main className="portal-page">
       {toast && <FeedbackToast title={toast.title} description={toast.description} type={toast.type} onClose={() => setToast(null)} durationMs={3200} />}
 
       <div style={{ display: 'grid', gap: 20 }}>

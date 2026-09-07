@@ -661,7 +661,7 @@ export default function UsersPage() {
   } as const;
 
   return (
-    <main style={{ maxWidth: 1280, margin: '0 auto', padding: 28 }}>
+    <main className="portal-page">
       {toast && <FeedbackToast title={toast.title} description={toast.description} type={toast.type} onClose={() => setToast(null)} durationMs={2800} />}
       <ConfirmDialog
         open={Boolean(pendingDeleteUser)}

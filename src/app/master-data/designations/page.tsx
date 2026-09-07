@@ -330,7 +330,7 @@ export default function DesignationsMasterDataPage() {
   };
 
   return (
-    <main style={{ maxWidth: 1400, margin: '0 auto', padding: 28 }}>
+    <main className="portal-page">
       {toast && <FeedbackToast title={toast.title} description={toast.description} type={toast.type} onClose={() => setToast(null)} durationMs={3200} />}
 
       <div style={{ display: 'grid', gap: 20 }}>
@@ -462,7 +462,7 @@ export default function DesignationsMasterDataPage() {
 
         <section className="card" style={{ padding: 18, borderRadius: 18, border: '1px solid rgba(148,163,184,0.18)', boxShadow: '0 12px 28px rgba(15,23,42,0.04)' }}>
           <div style={{ display: 'flex', alignItems: 'end', gap: 24, flexWrap: 'wrap', marginBottom: 16 }}>
-            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(220px, 1.2fr) minmax(180px, 240px)', gap: 12, flex: '1 1 640px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 180px), 1fr))', gap: 12, flex: '1 1 640px' }}>
               <label style={{ display: 'grid', gap: 8 }}>
                 <span style={{ fontWeight: 700, fontSize: 13 }}>Designation search</span>
                 <input

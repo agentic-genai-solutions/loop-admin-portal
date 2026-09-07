@@ -262,7 +262,7 @@ export default function AccessDelegationPage() {
   } as const;
 
   return (
-    <main style={{ maxWidth: 1400, margin: '0 auto', padding: 30 }}>
+    <main className="portal-page">
       <div style={{ display: 'grid', gap: 20 }}>
         <div style={{ ...sectionCardStyle, display: 'grid', gap: 18 }}>
           <div>
@@ -295,7 +295,7 @@ export default function AccessDelegationPage() {
           </div>
         </div>
 
-        <div style={{ display: 'grid', gap: 18, gridTemplateColumns: 'minmax(0, 1.2fr) minmax(0, 0.8fr)' }}>
+        <div style={{ display: 'grid', gap: 18, gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 360px), 1fr))' }}>
           <div style={sectionCardStyle}>
             <div style={{ display: 'grid', gap: 14 }}>
               <div style={toggleRowStyle}>
@@ -343,7 +343,7 @@ export default function AccessDelegationPage() {
           </div>
         </div>
 
-        <div style={{ display: 'grid', gap: 18, gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)' }}>
+        <div style={{ display: 'grid', gap: 18, gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 360px), 1fr))' }}>
           <div style={sectionCardStyle}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
