@@ -27,6 +27,12 @@ export default function AttendanceTimingPage() {
         apiFetchWithRetry<Policy[]>('/admin/attendance-timing'), fetchStores(),
         apiFetchWithRetry<Array<{employeeId?: string; firstName?: string; lastName?: string; storeId?: string}>>('/users'),
       ]);
+      const query = new URLSearchParams(window.location.search);
+      const scope = (query.get('scope') || 'enterprise') as Policy['scope'];
+      const targetId = query.get('targetId') || (scope === 'enterprise' ? 'all' : '');
+      if (['enterprise', 'store', 'employee'].includes(scope) && targetId) {
+        setForm(rules.find(rule => rule.scope === scope && rule.targetId === targetId) || { ...defaults, scope, targetId });
+      }
       setPolicies(rules); setStores(shopRows.map(shop => ({ id: String(shop.id), name: String(shop.name) })));
       setEmployees(people.filter(person => person.employeeId).map(person => ({ id: person.employeeId!, name: [person.firstName, person.lastName].filter(Boolean).join(' ') || person.employeeId!, storeId: String(person.storeId || '') })));
     } catch { setLoadFailed(true); setError('Unable to load attendance timing policies. Check your access and try again.'); }
@@ -67,6 +73,7 @@ export default function AttendanceTimingPage() {
         <p className="timing-hint">Employee → store → enterprise. The first active rule applies. Without an active rule, attendance remains unrestricted by these timing limits.</p>
         <div className="timing-form-grid">{fields.map(([key,label,hint,max]) => <label key={key}>{label}<input type="number" required min={0} max={max} step={1} value={form[key]} onChange={event => setForm({...form, [key]: event.target.value === '' ? '' : Number(event.target.value)})} /><small>{hint}</small></label>)}</div>
         <div className="timing-preview"><span><strong>Clock-in:</strong> start − {form.clockInBefore || 0} min → start + {Number(form.clockInAfter) + Number(form.startBuffer)} min</span><span><strong>Clock-out:</strong> end − {form.clockOutBefore || 0} min → end + {Number(form.clockOutAfter) + Number(form.endBuffer)} min</span></div>
+        <p className="timing-hint">After the clock-in window closes, the mobile app replaces the clock-in button with an elapsed-time message and an Apply for leave link. The calendar shows absence until leave is applied; pending leave is shown separately. Salary credit requires approval.</p>
         <p className="timing-hint">Actions outside these windows are blocked using server time. The start buffer also allows arrival without a late mark. Overnight shifts end the next day. Assigned-shift rules require an active schedule.</p>
         <div className="timing-actions"><label><input type="checkbox" checked={form.enabled} onChange={event => setForm({...form, enabled: event.target.checked})} /> Enable this rule</label><button className="btn btn-primary" type="submit">{saving ? 'Saving…' : 'Save rule'}</button></div>
       </fieldset>

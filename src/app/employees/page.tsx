@@ -1,5 +1,7 @@
 'use client';
 
+import AttendancePolicyEditor from '@/components/AttendancePolicyEditor';
+
 import { useEffect, useMemo, useState } from 'react';
 import { apiFetchWithRetry } from '@/lib/api';
 import { normalizeRole } from '@/lib/utils';
@@ -208,6 +210,7 @@ export default function EmployeesPage() {
                   <th>Department</th>
                   <th>Store</th>
                   <th>Status</th>
+                  <th>Attendance</th>
                 </tr>
               </thead>
               <tbody>
@@ -225,11 +228,12 @@ export default function EmployeesPage() {
                           {employee.status}
                         </span>
                       </td>
+                      <td><AttendancePolicyEditor scope="employee" profileId={employee.employeeCode} name={`${employee.firstName} ${employee.lastName}`} /></td>
                     </tr>
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={7} style={{ textAlign: 'center', padding: '22px 16px', color: '#64748b', fontWeight: 600 }}>
+                    <td colSpan={8} style={{ textAlign: 'center', padding: '22px 16px', color: '#64748b', fontWeight: 600 }}>
                       No employees found for the selected store.
                     </td>
                   </tr>

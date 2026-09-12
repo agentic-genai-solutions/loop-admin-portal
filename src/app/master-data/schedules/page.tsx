@@ -1,5 +1,7 @@
 'use client';
 
+import AttendancePolicyEditor from '@/components/AttendancePolicyEditor';
+
 import { ConfirmDialog, FeedbackToast } from '@/components/Feedback';
 import { apiFetchWithRetry } from '@/lib/api';
 import { getFieldBorder, inlineFieldErrorStyle } from '@/lib/form-ui';
@@ -590,6 +592,7 @@ export default function SchedulesMasterDataPage() {
 
   return (
     <main className="portal-page portal-page-grid" style={{ display: 'grid', gap: 20 }}>
+      <div className="card" style={{ padding: 20 }}><AttendancePolicyEditor scope="company" profileId="company" name="Entire company" /></div>
       {toast && (
         <FeedbackToast
           title={toast.title}

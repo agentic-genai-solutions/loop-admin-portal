@@ -1,5 +1,7 @@
 'use client';
 
+import AttendancePolicyEditor from '@/components/AttendancePolicyEditor';
+
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ConfirmDialog, FeedbackToast } from '@/components/Feedback';
 import { EmptyState, TableSkeleton } from '@/components/Loaders';
@@ -893,6 +895,7 @@ export default function StoresPage() {
                         <td style={{ padding: '16px 12px' }}><span className={`badge ${store.status === 'Operational' ? 'success' : store.status === 'New Setup' ? 'info' : 'warning'}`}>{store.status}</span></td>
                         <td style={{ padding: '16px 12px', position: 'sticky', right: 0, background: '#fff', zIndex: 1 }}>
                           <div style={{ display: 'flex', gap: 10, alignItems: 'center', minWidth: 92 }}>
+                            <AttendancePolicyEditor scope="shop" profileId={String(store.id)} name={store.name} />
                             <button type="button" aria-label={`Edit ${store.name}`} title="Edit store" onClick={() => handleEdit(store)} style={{ ...iconButtonStyle, background: '#dbeafe', color: '#1d4ed8' }}>
                               <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                                 <path d="M12 20h9" />

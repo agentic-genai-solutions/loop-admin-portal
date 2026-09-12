@@ -36,6 +36,8 @@ type PayrollRow = {
   status: 'Active' | 'Pending Review' | 'Approved' | 'Paid';
   budget: string;
   bonusSplit: string;
+  attendance: string;
+  overtime: number;
 };
 
 type SalaryRunError = {
@@ -119,7 +121,7 @@ export default function FinancePage() {
     setSalaryRuns(Array.isArray(runs) ? runs : []);
   };
 
-  const mapPayrollRows = (payrollEntries: Array<{ _id?: string; payrollId?: string; employeeId?: string; status?: string; netSalary?: number; baseSalary?: number; bonus?: number; sundayExtraPay?: number }>) => {
+  const mapPayrollRows = (payrollEntries: Array<{ _id?: string; payrollId?: string; employeeId?: string; status?: string; netSalary?: number; baseSalary?: number; bonus?: number; sundayExtraPay?: number; absentDays?: number; payableDays?: number; overtime?: number }>) => {
     return Array.isArray(payrollEntries)
       ? payrollEntries.map((entry) => {
           const amount = Number(entry.netSalary ?? entry.baseSalary ?? 0);
@@ -145,6 +147,8 @@ export default function FinancePage() {
             owner: entry.employeeId ?? 'Finance Team',
             status,
             budget: new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount),
+            attendance: `${Number(entry.payableDays ?? 0)} payable / ${Number(entry.absentDays ?? 0)} absent`,
+            overtime: Number(entry.overtime ?? 0),
             bonusSplit: `Manual ${new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(manualBonus)} / Sunday ${new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(sundayBonus)}`,
           } satisfies PayrollRow;
         })
@@ -152,7 +156,7 @@ export default function FinancePage() {
   };
 
   const reloadPayrollRows = async () => {
-    const payrollEntries = await apiFetchWithRetry<Array<{ _id?: string; payrollId?: string; employeeId?: string; status?: string; netSalary?: number; baseSalary?: number; bonus?: number; sundayExtraPay?: number }>>('/director/payroll').catch(() => []);
+    const payrollEntries = await apiFetchWithRetry<Array<{ _id?: string; payrollId?: string; employeeId?: string; status?: string; netSalary?: number; baseSalary?: number; bonus?: number; sundayExtraPay?: number; absentDays?: number; payableDays?: number; overtime?: number }>>('/director/payroll').catch(() => []);
     setRows(mapPayrollRows(Array.isArray(payrollEntries) ? payrollEntries : []));
   };
 
@@ -164,7 +168,7 @@ export default function FinancePage() {
       try {
         const [payrollReport, payrollEntries, employeeEntries, storeEntries, configEntries, runEntries] = await Promise.all([
           apiFetchWithRetry<{ totalPayroll?: number; totalSundayExtraPay?: number; approved?: number; pending?: number; paid?: number }>('/director/reports/payroll'),
-          apiFetchWithRetry<Array<{ _id?: string; payrollId?: string; employeeId?: string; status?: string; netSalary?: number; baseSalary?: number; bonus?: number; sundayExtraPay?: number }>>('/director/payroll').catch(() => []),
+          apiFetchWithRetry<Array<{ _id?: string; payrollId?: string; employeeId?: string; status?: string; netSalary?: number; baseSalary?: number; bonus?: number; sundayExtraPay?: number; absentDays?: number; payableDays?: number; overtime?: number }>>('/director/payroll').catch(() => []),
           apiFetchWithRetry<Array<{ employeeCode?: string; firstName?: string; lastName?: string; storeId?: string }>>('/employees').catch(() => []),
           apiFetchWithRetry<Array<{ _id?: string; id?: string; name?: string }>>('/stores').catch(() => []),
           apiFetchWithRetry<SalaryConfig[]>('/accounting/payroll/salary-configs').catch(() => []),
@@ -498,6 +502,8 @@ export default function FinancePage() {
                       Bonus Split {getSortArrow('bonusSplit')}
                     </button>
                   </th>
+                  <th>Attendance days</th>
+                  <th>Overtime pay</th>
                   <th>Action</th>
                 </tr>
               </thead>
@@ -509,6 +515,8 @@ export default function FinancePage() {
                     <td><span className={`badge ${item.status === 'Approved' || item.status === 'Paid' ? 'success' : item.status === 'Pending Review' ? 'warning' : 'danger'}`}>{item.status}</span></td>
                     <td>{item.budget}</td>
                     <td>{item.bonusSplit}</td>
+                    <td>{item.attendance}</td>
+                    <td>{item.overtime.toFixed(2)}</td>
                     <td>
                       {item.status === 'Pending Review' ? (
                         <button type="button" className="btn tertiary" onClick={() => handleUpdatePayrollStatus(item, 'approved')}>Approve</button>
