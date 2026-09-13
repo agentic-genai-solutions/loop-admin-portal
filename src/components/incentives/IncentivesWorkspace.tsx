@@ -3,13 +3,18 @@
 import Link from 'next/link';
 import styles from './incentives.module.css';
 import ShopRewards from './ShopRewards';
+import AwardRewardModal from './AwardRewardModal';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FeedbackToast } from '@/components/Feedback';
 import { EmptyState, TableSkeleton } from '@/components/Loaders';
 import { fetchIncentives, fetchStores } from '@/lib/admin-data';
-import { apiFetchWithRetry } from '@/lib/api';
+import { apiFetch, apiFetchWithRetry } from '@/lib/api';
 
-type IncentiveProgram = {
+export type IncentiveProgram = {
+  scope?: string;
+  storeIds?: string[];
+  employeeIds?: string[];
+  notificationScope?: string;
   id?: string;
   name: string;
   type: string;
@@ -35,6 +40,9 @@ type EmployeeOptionResponse = {
   lastName?: string;
   email?: string;
   employeeCode?: string;
+  employeeId?: string;
+  storeId?: string;
+  isActive?: boolean;
   isDeleted?: boolean;
   deletedAt?: string;
 };
@@ -49,7 +57,7 @@ const initialProgramForm = {
   targetValue: '',
   stores: 'All Stores',
   employees: 'All Employees',
-  notification: 'In-app',
+  notificationScope: 'employee',
   guideline: '',
 };
 
@@ -68,6 +76,10 @@ function readSavedPrograms(): IncentiveProgram[] {
 }
 
 export default function IncentivesWorkspace({ view, initiallyOpen = false }: { view: View; initiallyOpen?: boolean }) {
+  const [isAwarding, setIsAwarding] = useState(false);
+  const [rewardRevision, setRewardRevision] = useState(0);
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('All statuses');
@@ -147,12 +159,12 @@ export default function IncentivesWorkspace({ view, initiallyOpen = false }: { v
     let cancelled = false;
     const store = programForm.stores;
     setEmployeeOptions(null);
-    const path = store === 'All Stores' ? '/employees' : `/employees/store/${encodeURIComponent(store)}`;
+    const path = '/users';
     apiFetchWithRetry<EmployeeOptionResponse[]>(path).then((rows) => {
       const items = (Array.isArray(rows) ? rows : [])
-        .filter((employee) => !employee.isDeleted && !employee.deletedAt)
+        .filter((employee) => !employee.isDeleted && !employee.deletedAt && employee.isActive !== false && (store === 'All Stores' || employee.storeId === store))
         .map((employee) => ({
-          id: String(employee._id ?? employee.id ?? ''),
+          id: String(employee.employeeId || ''),
           name: [employee.firstName, employee.lastName].filter(Boolean).join(' ').trim() || employee.email || employee.employeeCode || 'Unnamed employee',
         }))
         .filter((employee) => employee.id)
@@ -196,7 +208,8 @@ export default function IncentivesWorkspace({ view, initiallyOpen = false }: { v
     setProgramForm((current) => ({ ...current, [field]: value, ...(field === 'stores' ? { employees: 'All Employees' } : {}) }));
   };
 
-  const handleSaveProgram = () => {
+  const handleSaveProgram = async () => {
+    if (savingRef.current) return;
     const trimmedName = programForm.name.trim();
     if (!trimmedName) {
       showToast('Program name is required before saving.', 'error');
@@ -221,42 +234,24 @@ export default function IncentivesWorkspace({ view, initiallyOpen = false }: { v
       showToast('Wait for the selected store and employee to load.', 'error');
       return;
     }
-    const newProgram: IncentiveProgram = {
-      id: `${trimmedName.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${Date.now()}`,
-      name: trimmedName,
-      type: programForm.scope,
-      payout: `$${Number.isFinite(normalizedAmount) && normalizedAmount > 0 ? normalizedAmount.toLocaleString() : '0'}`,
-      target: `${programForm.targetMetric} • ${programForm.targetValue || 'Configured target'}`,
-      status: 'Active',
-      category: programForm.scope,
-      frequency: programForm.frequency,
-      amount: normalizedAmount,
-      currency: 'USD',
-      guideline: programForm.guideline || 'Set the KPI, target threshold and award rule for this program.',
-      stores: [stores.find((store) => store.id === programForm.stores)?.name ?? 'All Stores'],
-      employees: [employeeOptions?.items.find((employee) => employee.id === programForm.employees)?.name ?? 'All Employees'],
-      notification: programForm.notification,
-      targetMetric: programForm.targetMetric,
-      targetValue: programForm.targetValue || 'Configured threshold',
-    };
-
+    savingRef.current = true;
+    setSaving(true);
     try {
-      window.localStorage.setItem(storageKey(), JSON.stringify([newProgram, ...readSavedPrograms()]));
-    } catch {
-      showToast('Unable to save this program in your browser. Check browser storage and try again.', 'error');
-      return;
-    }
-    setPrograms((current) => [newProgram, ...current]);
-    setSummary((current) => ({
-      ...current,
-      activePrograms: current.activePrograms + 1,
-      staffEntries: current.staffEntries,
-    }));
-    setProgramForm(initialProgramForm);
-    setIsCreatingProgram(false);
-    setSearch('');
-    setStatusFilter('All statuses');
-    showToast('Incentive program saved successfully.', 'success');
+      await apiFetch('/incentives/programs', { method: 'POST', body: JSON.stringify({
+        name: trimmedName, scope: programForm.scope === 'Store-wide' ? 'store' : programForm.scope === 'Employee-specific' ? 'employee' : 'organization',
+        amount: normalizedAmount, currency: 'USD', frequency: programForm.frequency,
+        guideline: programForm.guideline, targetMetric: programForm.targetMetric, targetValue: programForm.targetValue,
+        storeIds: programForm.scope === 'Store-wide' ? [programForm.stores] : [],
+        employeeIds: programForm.scope === 'Employee-specific' ? [programForm.employees] : [],
+        notificationScope: programForm.notificationScope,
+      }) });
+      setProgramForm(initialProgramForm);
+      setIsCreatingProgram(false);
+      setSearch(''); setStatusFilter('All statuses');
+      showToast('Program saved. You can now award it to an employee.', 'success');
+      await loadData();
+    } catch { showToast('The program could not be saved. Check your connection and try again.', 'error'); }
+    finally { setSaving(false); savingRef.current = false; }
   };
 
   const getProgramSortArrow = (column: 'name' | 'type' | 'payout' | 'target' | 'status') => {
@@ -276,7 +271,8 @@ export default function IncentivesWorkspace({ view, initiallyOpen = false }: { v
         <nav className={styles.tabs} aria-label="Incentive pages">
           {navigation.map((item) => <Link key={item.key} href={item.href} aria-current={view === item.key ? 'page' : undefined}>{item.label}</Link>)}
         </nav>
-        <button type="button" className={styles.primary} onClick={() => setIsCreatingProgram(true)}>+ New program</button>
+        {view === 'programs' && <button type="button" className={styles.primary} onClick={() => setIsCreatingProgram(true)}>+ New program</button>}
+        {view === 'entries' && <button type="button" className={styles.primary} disabled={isLoading || hasLoadError} onClick={() => { setToast(null); setIsAwarding(true); }}>Award employee</button>}
       </div>
       {view === 'overview' && <>
         <section className={styles.metrics} aria-label="Incentive summary">
@@ -284,26 +280,26 @@ export default function IncentivesWorkspace({ view, initiallyOpen = false }: { v
         </section>
         <section className={styles.panel}>
           <div className={styles.panelHeader}><div><h2>Programs <span className={styles.count}>{isLoading ? '…' : programs.length}</span></h2></div><Link href="/incentives/programs" className={styles.textLink}>View all programs →</Link></div>
-          {isLoading ? <TableSkeleton columns={3} rows={2} /> : hasLoadError ? <EmptyState variant="error" onRetry={loadData} /> : programs.length === 0 ? <div className={styles.empty}><span className={styles.emptyIcon}>✧</span><h3>No programs yet</h3><p>Add a program to start rewarding your team.</p><button type="button" className={styles.primary} onClick={() => setIsCreatingProgram(true)}>Create first program</button></div> : <div className={styles.programGrid}>{programs.slice(0, 3).map((program) => <button className={styles.programCard} key={program.id} onClick={() => setSelectedProgram(program)}><span className={styles.cardTop}><span className={styles.programIcon}>✧</span><span className={`badge ${program.status === 'Active' ? 'success' : 'info'}`}>{program.status}</span></span><h3>{program.name}</h3><p>{program.type}</p><strong>{program.payout}<small> / {program.frequency || 'Monthly'}</small></strong><span className={styles.cardFooter}>{(program.stores || ['All Stores']).join(', ')}<span>View details →</span></span></button>)}</div>}
+          {isLoading ? <TableSkeleton columns={3} rows={2} /> : hasLoadError ? <EmptyState variant="error" onRetry={loadData} /> : programs.length === 0 ? <div className={styles.empty}><span className={styles.emptyIcon}>✧</span><h3>No programs yet</h3><p>Add a program to start rewarding your team.</p><Link className={styles.primary} href="/incentives/programs">Go to programs</Link></div> : <div className={styles.programGrid}>{programs.slice(0, 3).map((program) => <button className={styles.programCard} key={program.id} onClick={() => setSelectedProgram(program)}><span className={styles.cardTop}><span className={styles.programIcon}>✧</span><span className={`badge ${program.status === 'Active' ? 'success' : 'info'}`}>{program.status}</span></span><h3>{program.name}</h3><p>{program.type}</p><strong>{program.payout}<small> / {program.frequency || 'Monthly'}</small></strong><span className={styles.cardFooter}>{(program.stores || ['All Stores']).join(', ')}<span>View details →</span></span></button>)}</div>}
         </section>
         <Link href="/incentives/entries" className={styles.entryLink}><div><h3>Employee rewards</h3><p>{isLoading ? 'Loading…' : `${summary.staffEntries} entries · ${summary.approvalRate} approved`}</p></div><span aria-hidden="true">→</span></Link>
       </>}
       {view === 'programs' && <section className={styles.panel}>
         <div className={styles.filters}><input aria-label="Search programs" placeholder="Search programs, stores, or employees…" value={search} onChange={(event) => setSearch(event.target.value)} /><select aria-label="Filter by status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>{['All statuses', ...Array.from(new Set(programs.map((program) => program.status)))].map((status) => <option key={status}>{status}</option>)}</select></div>
-        <div className={styles.resultsBar}><span role="status">{isLoading ? 'Loading programs…' : hasLoadError ? 'Programs unavailable' : `${sortedPrograms.length} of ${programs.length} programs`}</span>{(search || statusFilter !== 'All statuses') && <button type="button" className={styles.textButton} onClick={() => { setSearch(''); setStatusFilter('All statuses'); }}>Clear filters</button>}<span className={styles.storageHint}>New programs are saved in this browser</span></div>
-        {isLoading ? <TableSkeleton columns={5} rows={4} /> : hasLoadError ? <EmptyState variant="error" onRetry={loadData} /> : programs.length === 0 ? <div className={styles.empty}><span className={styles.emptyIcon}>✧</span><h3>No programs yet</h3><p>Create a reward program and it will be listed here.</p><button type="button" className={styles.primary} onClick={() => setIsCreatingProgram(true)}>Create first program</button></div> : <div className={styles.tableWrap}><table className="table"><thead><tr>{([['name', 'Program'], ['type', 'Eligibility'], ['payout', 'Reward'], ['target', 'Target'], ['status', 'Status']] as const).map(([key, label]) => <th key={key} aria-sort={programSortBy === key ? programSortDirection === 'asc' ? 'ascending' : 'descending' : 'none'}><button className={styles.sortButton} onClick={() => handleProgramSort(key)}>{label} {getProgramSortArrow(key)}</button></th>)}</tr></thead><tbody>{sortedPrograms.length ? sortedPrograms.map((program) => <tr key={program.id}><td><button className={styles.programName} onClick={() => setSelectedProgram(program)}>{program.name}</button><small className={styles.cellSub}>{program.frequency || 'Monthly'}</small></td><td>{program.type}<small className={styles.cellSub}>{(program.stores || ['All Stores']).join(', ')} · {(program.employees || ['All Employees']).join(', ')}</small></td><td><strong>{program.payout}</strong></td><td>{program.target}</td><td><span className={`badge ${program.status === 'Active' ? 'success' : 'info'}`}>{program.status}</span></td></tr>) : <EmptyState colSpan={5} title="No matching programs" description="Try another search or status filter." />}</tbody></table></div>}
+        <div className={styles.resultsBar}><span role="status">{isLoading ? 'Loading programs…' : hasLoadError ? 'Programs unavailable' : `${sortedPrograms.length} of ${programs.length} programs`}</span>{(search || statusFilter !== 'All statuses') && <button type="button" className={styles.textButton} onClick={() => { setSearch(''); setStatusFilter('All statuses'); }}>Clear filters</button>}<span className={styles.storageHint}>New programs are saved online</span></div>
+        {isLoading ? <TableSkeleton columns={5} rows={4} /> : hasLoadError ? <EmptyState variant="error" onRetry={loadData} /> : programs.length === 0 ? <div className={styles.empty}><span className={styles.emptyIcon}>✧</span><h3>No programs yet</h3><p>Create a reward program and it will be listed here.</p><button type="button" className={styles.primary} onClick={() => setIsCreatingProgram(true)}>Create first program</button></div> : <div className={styles.tableWrap}><table className="table"><thead><tr>{([['name', 'Program'], ['type', 'Eligibility'], ['payout', 'Reward'], ['target', 'Target'], ['status', 'Status']] as const).map(([key, label]) => <th key={key} aria-sort={programSortBy === key ? programSortDirection === 'asc' ? 'ascending' : 'descending' : 'none'}><button className={styles.sortButton} onClick={() => handleProgramSort(key)}>{label} {getProgramSortArrow(key)}</button></th>)}</tr></thead><tbody>{sortedPrograms.length ? sortedPrograms.map((program) => <tr key={program.id}><td><button className={styles.programName} onClick={() => setSelectedProgram(program)}>{program.name}</button><small className={styles.cellSub}>{program.frequency || 'Monthly'}{!/^[a-f\d]{24}$/i.test(program.id || '') ? ' · Browser draft' : ''}</small></td><td>{program.type}<small className={styles.cellSub}>{(program.stores || ['All Stores']).join(', ')} · {(program.employees || ['All Employees']).join(', ')}</small></td><td><strong>{program.payout}</strong></td><td>{program.target}</td><td><span className={`badge ${program.status === 'Active' ? 'success' : 'info'}`}>{program.status}</span></td></tr>) : <EmptyState colSpan={5} title="No matching programs" description="Try another search or status filter." />}</tbody></table></div>}
       </section>}
-      {view === 'entries' && <ShopRewards />}
-      {isCreatingProgram && <dialog ref={dialogRef} className={styles.modal} aria-labelledby="new-program-title" onCancel={() => setIsCreatingProgram(false)} onClick={(event) => {
-        if (event.target === event.currentTarget) {
+      {view === 'entries' && <ShopRewards key={rewardRevision} />}
+      {isCreatingProgram && <dialog ref={dialogRef} className={styles.modal} aria-labelledby="new-program-title" onCancel={(event) => { if (saving) event.preventDefault(); else setIsCreatingProgram(false); }} onClick={(event) => {
+        if (!saving && event.target === event.currentTarget) {
           const bounds = event.currentTarget.getBoundingClientRect();
           if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) setIsCreatingProgram(false);
         }
       }}>
         {toast && <FeedbackToast title={toast.type === 'success' ? 'Success' : 'Error'} description={toast.message} type={toast.type} onClose={() => setToast(null)} durationMs={4000} />}
         <form className={`${styles.panel} ${styles.form}`} onSubmit={(event) => { event.preventDefault(); handleSaveProgram(); }}>
-        <div className={styles.panelHeader}><div><h2 id="new-program-title">New program</h2></div><button type="button" className={styles.secondary} aria-label="Close new program" onClick={() => setIsCreatingProgram(false)}>×</button></div>
-        <p className={styles.storageNote}>This program will be saved in this browser for your account.</p>
+        <div className={styles.panelHeader}><div><h2 id="new-program-title">New program</h2></div><button type="button" className={styles.secondary} aria-label="Close new program" disabled={saving} onClick={() => setIsCreatingProgram(false)}>×</button></div>
+        <p className={styles.storageNote}>Set the reward and choose who hears about it when an employee earns it.</p>
             <div className={styles.formGrid}>
               <div className={styles.formSection}><span>01</span><div><h3>Reward & target</h3></div></div>
               <label style={{ display: 'grid', gap: 6, fontWeight: 700, color: '#0f172a' }}>
@@ -368,12 +364,13 @@ export default function IncentivesWorkspace({ view, initiallyOpen = false }: { v
               </label>
 
               <label style={{ display: 'grid', gap: 6, fontWeight: 700, color: '#0f172a' }}>
-                Notification in app
-                <select value={programForm.notification} onChange={(event) => handleProgramFormChange('notification', event.target.value)} style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(148,163,184,0.5)', fontSize: 14 }}>
-                  <option value="In-app">In-app</option>
-                  <option value="In-app + push">In-app + push</option>
-                  <option value="Dashboard only">Dashboard only</option>
+                Who should receive reward notifications?
+                <select value={programForm.notificationScope} onChange={(event) => handleProgramFormChange('notificationScope', event.target.value)}>
+                  <option value="employee">Employee only — personal congratulations</option>
+                  <option value="store">Employee’s store — celebrate with their team</option>
+                  <option value="organization">Organization-wide — tell everyone</option>
                 </select>
+                <small>Sent in the app when a reward is awarded or approved. Store and organization announcements also include personal congratulations.</small>
               </label>
 
               <label style={{ display: 'grid', gap: 6, fontWeight: 700, color: '#0f172a', gridColumn: '1 / -1' }}>
@@ -383,14 +380,18 @@ export default function IncentivesWorkspace({ view, initiallyOpen = false }: { v
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 18 }}>
-              <button type="button" onClick={() => setIsCreatingProgram(false)} style={{ padding: '12px 18px', borderRadius: 12, background: '#e2e8f0', color: '#0f172a', border: 'none', fontWeight: 800, cursor: 'pointer' }}>Cancel</button>
-              <button type="submit" style={{ padding: '12px 18px', borderRadius: 12, background: '#0f172a', color: '#fff', border: 'none', fontWeight: 800, cursor: 'pointer' }}>Save Program</button>
+              <button type="button" disabled={saving} onClick={() => setIsCreatingProgram(false)} style={{ padding: '12px 18px', borderRadius: 12, background: '#e2e8f0', color: '#0f172a', border: 'none', fontWeight: 800, cursor: 'pointer' }}>Cancel</button>
+              <button type="submit" disabled={saving} style={{ padding: '12px 18px', borderRadius: 12, background: '#0f172a', color: '#fff', border: 'none', fontWeight: 800, cursor: 'pointer' }}>{saving ? 'Saving…' : 'Save program'}</button>
             </div>
       </form></dialog>}
       {selectedProgram && <section id="incentive-program-details" tabIndex={-1} className={styles.panel} aria-label="Program details">
         <div className={styles.panelHeader}><div><h2>{selectedProgram.name}</h2></div><button className={styles.secondary} onClick={() => setSelectedProgram(null)}>Close details</button></div>
         <p>{selectedProgram.guideline}</p><dl className={styles.details}>{[['Status', selectedProgram.status], ['Scope', selectedProgram.type], ['Reward', selectedProgram.payout], ['Frequency', selectedProgram.frequency], ['Target', selectedProgram.target], ['Stores', selectedProgram.stores?.join(', ')], ['Employees', selectedProgram.employees?.join(', ')], ['Notification', selectedProgram.notification]].map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value || '—'}</dd></div>)}</dl>
       </section>}
+      {isAwarding && <AwardRewardModal programs={programs} onClose={() => setIsAwarding(false)} onProgramSaved={(oldId) => {
+        try { window.localStorage.setItem(storageKey(), JSON.stringify(readSavedPrograms().filter(item => item.id !== oldId))); } catch { /* The server program remains available if storage is unavailable. */ }
+        void loadData();
+      }} onAwarded={(notificationError) => { setIsAwarding(false); setRewardRevision(current => current + 1); showToast(notificationError ? 'Reward awarded. Notification delivery needs a retry from Rewards.' : 'Reward awarded and notifications sent.', notificationError ? 'error' : 'success'); void loadData(); }} />}
     </main>
   );
 }

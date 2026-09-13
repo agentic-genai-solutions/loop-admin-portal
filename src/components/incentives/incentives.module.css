@@ -89,3 +89,50 @@
 .rewardGroup { margin-top: 18px; padding-top: 18px; }
 .formSection { padding-top: 16px; margin-top: 0; }
 @media (max-width: 640px) { .pageToolbar { gap: 10px; flex-wrap: wrap; } .pageToolbar .tabs { gap: 18px; } .pageToolbar > button { padding: 10px 12px; } .panel { padding: 16px; } .storageHint, .inlineHelp { margin-left: 0; } .metric { padding: 16px; } }
+.awardModal { max-width: 600px; }
+.awardEyebrow { font-size: 10px; letter-spacing: .13em; color: #137b72; font-weight: 700; }
+.awardBanner { display: flex; align-items: center; gap: 15px; padding: 20px; margin: 18px 0; border: 1px solid #e7dfc7; border-radius: 14px; background: #fff9e9 url('/message-overlays/achievement.png') right bottom / 140px no-repeat; }
+.awardBanner > span { font-size: 30px; }
+.awardBanner p { margin: 5px 0 0; color: #807345; font-size: 13px; }
+.awardFields { border: 0; padding: 0; margin: 0; display: grid; gap: 16px; min-width: 0; }
+.awardFields label { display: grid; gap: 7px; font-size: 13px; font-weight: 600; color: #30495d; min-width: 0; }
+.awardFields input, .awardFields select { width: 100%; min-width: 0; padding: 11px 12px; border: 1px solid #dce5ea; border-radius: 9px; color: #253e4d; background: #fff; }
+.awardFields small { font-size: 11px; color: #718391; font-weight: 400; line-height: 1.5; }
+.awardColumns { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.awardSummary { padding: 16px; border-radius: 12px; background: #eef7f4; color: #276d5f; font-size: 13px; }
+.awardSummary p { margin: 7px 0; }
+.awardActions { display: flex; justify-content: flex-end; gap: 10px; padding-top: 6px; }
+@media (max-width: 520px) { .awardColumns { grid-template-columns: 1fr; } }
+.modal.awardModal { padding: 24px; }
+.awardError { padding: 12px 14px; border-radius: 9px; background: #fff1f0; border: 1px solid #f2d0cd; color: #a4433b; font-size: 13px; }
+.awardActions { position: sticky; bottom: -24px; padding: 16px 0 8px; background: #fff; }
+@media (max-width: 520px) { .modal.awardModal { padding: 18px; } }
+/* The dialog shell never scrolls: only the form body does. */
+.awardDialog { width: min(660px, calc(100vw - 32px)); max-width: none; max-height: min(840px, calc(100dvh - 40px)); padding: 0; margin: auto; border: 1px solid #e2e8ed; border-radius: 18px; background: #fff; color: #203547; overflow: hidden; box-shadow: 0 24px 80px #15283d30; }
+.awardDialog[open] { display: flex; flex-direction: column; }
+.awardDialog::backdrop { background: #16283c70; backdrop-filter: blur(3px); }
+.awardHeader { display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; gap: 16px; padding: 22px 26px; border-bottom: 1px solid #e8edf0; }
+.awardHeader h2 { margin: 5px 0 0; font-size: 22px; letter-spacing: -.6px; }
+.awardHeader > button { width: 36px; height: 36px; padding: 0; font-size: 22px; }
+.awardForm { display: flex; flex-direction: column; flex: 1; min-height: 0; margin: 0; overflow: hidden; }
+.awardScroll { overflow-y: auto; overscroll-behavior: contain; padding: 22px 26px; min-height: 0; }
+.awardDialog .awardBanner { margin: 0; padding: 14px 18px; background-size: 100px; }
+.awardDialog .awardFields { gap: 17px; }
+.awardDialog .awardFields input, .awardDialog .awardFields select { box-sizing: border-box; font: inherit; font-size: 13px; font-weight: 400; min-height: 44px; }
+.awardDialog .awardSummary { font-size: 12px; padding: 14px 16px; }
+.awardFooter { display: flex; flex-shrink: 0; align-items: center; justify-content: space-between; gap: 16px; padding: 18px 26px; border-top: 1px solid #e2e9ed; background: #fbfcfd; }
+.awardFooter > span { font-size: 11px; color: #718391; max-width: 200px; line-height: 1.5; }
+.awardFooter > div { display: flex; gap: 10px; }
+.awardDialog button:disabled, .pageToolbar button:disabled { opacity: .5; cursor: not-allowed; }
+.awardDialog :is(button, input, select):focus-visible { outline: 2px solid #137b72; outline-offset: 3px; }
+.hint { font-size: 13px; line-height: 1.6; color: #718391; }
+@media (max-width: 520px) { .awardDialog { width: calc(100vw - 20px); max-height: calc(100dvh - 20px); } .awardHeader, .awardScroll { padding: 18px; } .awardFooter { padding: 14px 18px; flex-direction: column; align-items: stretch; gap: 10px; } .awardFooter > span { max-width: none; } .awardFooter > div { justify-content: flex-end; } }
+
+.employeeSelect { position: relative; display: grid; gap: 7px; min-width: 0; }
+.employeeSelectInput { position: relative; }
+.awardFields .employeeSelectInput input { padding-right: 34px; }
+.employeeSelectInput > span { position: absolute; right: 14px; top: 50%; transform: translateY(-50%); color: #718391; pointer-events: none; }
+.employeeOptions { position: absolute; z-index: 5; top: 100%; left: 0; right: 0; max-height: 220px; overflow-y: auto; overscroll-behavior: contain; margin: 5px 0 0; padding: 5px; list-style: none; border: 1px solid #dce5ea; border-radius: 10px; background: #fff; box-shadow: 0 12px 30px #15283d20; }
+.employeeOptions li { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+.employeeOptions li:hover, .employeeOptions li[data-active="true"], .employeeOptions li[aria-selected="true"] { background: #edf7f4; color: #137b72; }
+.employeeOptions .employeeEmpty { color: #718391; cursor: default; }

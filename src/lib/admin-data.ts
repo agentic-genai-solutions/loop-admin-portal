@@ -251,53 +251,40 @@ export async function fetchReports() {
 }
 
 export async function fetchIncentives() {
-  const [payroll, programs, entries] = await Promise.all([
-    apiFetchWithRetry<{ totalPayroll?: number; paid?: number; pending?: number }>('/director/reports/payroll').catch(() => ({ totalPayroll: 0, paid: 0, pending: 0 })),
-    apiFetchWithRetry<Array<any>>('/incentives/programs').catch(() => []),
-    apiFetchWithRetry<Array<any>>('/incentives/entries').catch(() => []),
+  const allPages = async (path: string) => {
+    const rows: any[] = [];
+    for (let offset = 0; ; offset += 100) {
+      const page = await apiFetchWithRetry<any[]>(`${path}?limit=100&offset=${offset}`);
+      if (!Array.isArray(page)) throw new Error('Invalid incentives response');
+      rows.push(...page);
+      if (page.length < 100) return rows;
+    }
+  };
+  const [programs, entries, stores, users] = await Promise.all([
+    allPages('/incentives/programs'), allPages('/incentives/entries'),
+    loadStoreLabelById(), apiFetchWithRetry<any[]>('/users'),
   ]);
-
-  const programList = Array.isArray(programs) ? programs : [];
-  const entryList = Array.isArray(entries) ? entries : [];
-
-  const safeAmount = Number.isFinite(Number(payroll?.totalPayroll)) ? Number(payroll.totalPayroll) : 0;
-  const activePrograms = programList.filter((program) => String(program.status ?? '').toLowerCase() === 'active').length;
-  const approvedEntries = entryList.filter((entry) => String(entry.status ?? '').toLowerCase() === 'approved').length;
-  const totalEntries = entryList.length || 1;
-  const approvalRate = entryList.length > 0 ? Math.max(0, Math.min(100, Math.round((approvedEntries / totalEntries) * 100))) : 0;
-
+  const names = new Map(users.map(user => [user.employeeId, [user.firstName, user.lastName].filter(Boolean).join(' ')]));
+  const approved = entries.filter(entry => entry.status === 'Approved');
+  const month = new Date();
+  const period = `${month.getFullYear()}-${String(month.getMonth() + 1).padStart(2, '0')}`;
+  const totals = approved.filter(entry => entry.period === period).reduce<Record<string, number>>((sum, entry) => ({ ...sum, [entry.currency]: (sum[entry.currency] || 0) + entry.amount }), {});
   return {
-    programs: programList.map((program) => ({
-      id: String(program.id ?? `${program.name ?? 'program'}-${Math.random()}`),
-      name: String(program.name ?? 'Untitled Program'),
-      type: String(program.type ?? program.category ?? 'Sales'),
-      payout: String(program.payout ?? `$${Number(program.amount ?? 0).toLocaleString()}`),
-      target: String(program.target ?? program.targetValue ?? 'Configured target'),
-      status: String(program.status ?? 'Active'),
-      category: String(program.category ?? program.type ?? 'Sales'),
-      frequency: String(program.frequency ?? 'Monthly'),
-      amount: Number(program.amount ?? 0),
-      currency: String(program.currency ?? 'USD'),
-      guideline: String(program.guideline ?? 'Set the rule for this incentive.'),
-      stores: Array.isArray(program.stores) ? program.stores : ['All Stores'],
-      employees: Array.isArray(program.employees) ? program.employees : ['All Employees'],
-      notification: String(program.notification ?? 'In-app'),
-      targetMetric: String(program.targetMetric ?? 'Performance target'),
-      targetValue: String(program.targetValue ?? 'Configured value'),
+    programs: programs.map(program => ({
+      ...program, id: String(program.id || program._id),
+      type: ({ organization: 'Organization-wide', store: 'Store-wide', employee: 'Employee-specific' } as Record<string, string>)[program.scope] || program.scope,
+      payout: `${program.currency} ${Number(program.amount).toLocaleString()}`,
+      target: [program.targetMetric, program.targetValue].filter(Boolean).join(' · ') || '—',
+      stores: program.storeIds?.length ? program.storeIds.map((id: string) => stores.get(id) || id) : ['All Stores'],
+      employees: program.employeeIds?.length ? program.employeeIds.map((id: string) => names.get(id) || id) : ['All Employees'],
+      notification: ({ employee: 'Employee only', store: 'Employee’s store', organization: 'Everyone in the organization' } as Record<string, string>)[program.notificationScope || 'employee'],
     })),
-    entries: entryList.map((entry) => ({
-      employee: String(entry.employee ?? 'Employee'),
-      store: String(entry.store ?? 'All Stores'),
-      program: String(entry.program ?? 'Program'),
-      amount: String(entry.amount ?? '$0'),
-      period: String(entry.period ?? 'Current cycle'),
-      status: String(entry.status ?? 'Pending'),
-    })),
+    entries,
     summary: {
-      monthlyPayout: safeAmount ? `$${safeAmount.toLocaleString()}` : '$0',
-      activePrograms,
-      approvalRate: `${approvalRate}%`,
-      staffEntries: entryList.length,
+      monthlyPayout: Object.entries(totals).map(([currency, amount]) => `${currency} ${amount.toLocaleString()}`).join(' · ') || '0',
+      activePrograms: programs.filter(program => program.status === 'Active').length,
+      approvalRate: entries.length ? `${Math.round(approved.length / entries.length * 100)}%` : '0%',
+      staffEntries: entries.length,
     },
   };
 }

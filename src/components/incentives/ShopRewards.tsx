@@ -72,7 +72,7 @@ export default function ShopRewards() {
       } else {
         await apiFetch(`/incentives/entries/${encodeURIComponent(reward.id)}/notifications`, { method: 'POST' });
         setSent((current) => [...current, reward.id]);
-        setNotice('Announcement available to all employees. Personal congratulations sent to the recipient.');
+        setNotice('Notifications sent to the audience configured for this reward.');
       }
     } catch { setNotice('Could not complete the action. Refresh to check the reward status before retrying.'); }
     finally { setBusy(null); busyRef.current = false; }
@@ -86,7 +86,7 @@ export default function ShopRewards() {
       <button className={styles.secondary} disabled={loading || busy !== null} onClick={load}>{loading ? 'Refreshing…' : 'Refresh'}</button>
     </div>
     <div className={styles.resultsBar}><span role="status">{loading ? 'Loading rewards…' : error ? 'Rewards unavailable' : `${groups.reduce((count, group) => count + group.rows.length, 0)} ${status.toLowerCase()} rewards · ${groups.length} shops`}</span>{(search || shop !== 'all' || status !== 'Approved') && <button className={styles.textButton} onClick={() => { setSearch(''); setShop('all'); setStatus('Approved'); }}>Reset filters</button>}
-      {status !== 'Rejected' && <details className={styles.inlineHelp}><summary>Notification details</summary><p>{status === 'Pending' ? 'Approving a reward' : 'Announcing a reward'} notifies all employees and sends personal 🎉 congratulations to the recipient, with their photo when available.</p></details>}
+      {status !== 'Rejected' && <details className={styles.inlineHelp}><summary>Notification details</summary><p>{status === 'Pending' ? 'Approving a reward' : 'Announcing a reward'} uses the program’s notification audience and sends personal congratulations to the recipient.</p></details>}
     </div>
     {notice && <p role="status" className={styles.rewardNotice}>{notice}</p>}
     {loading ? <TableSkeleton columns={5} rows={3} /> : error ? <EmptyState variant="error" onRetry={load} /> : !groups.length ? <div className={styles.empty}><span className={styles.emptyIcon}>🏆</span><h3>No {status.toLowerCase()} rewards found</h3><p>{search || shop !== 'all' ? 'Try another shop or clear your search.' : status === 'Pending' ? 'You’re all caught up.' : 'Rewards will appear here when their status changes.'}</p></div> : groups.map((group) => {

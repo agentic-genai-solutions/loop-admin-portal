@@ -162,3 +162,11 @@
 .previewCard[data-variant] .placeholder { color: #687984; }
 
 .previewCard[data-variant] > *, .messageBody[data-variant] > * { position: relative; z-index: 1; }
+/* Editorial message templates: clear title, generous rhythm, illustrated corner. */
+.previewCard[data-variant] { border-radius: 18px; padding: 22px; min-height: 290px; box-shadow: 0 14px 32px #304d3f0c; }
+.previewCard[data-variant] .previewSender { padding-bottom: 17px; border-bottom: 1px solid var(--edge); }
+.previewCard[data-variant] h4 { font-size: 22px; line-height: 1.35; letter-spacing: -.65px; margin: 24px 0 16px; font-weight: 700; color: #233d4d; }
+.previewCard[data-variant] > p { font-size: 13px; line-height: 1.85; padding-bottom: 28px; color: #344f5f; }
+.previewCard[data-variant]::before { background-size: 320px 320px; opacity: .25; }
+.messageBody[data-variant] { padding: 22px; min-height: 170px; border-radius: 14px; }
+.messageBody[data-variant]::before { opacity: .25; }
