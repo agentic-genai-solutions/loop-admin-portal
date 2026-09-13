@@ -1,574 +1,281 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { EmptyState, TableSkeleton } from '@/components/Loaders';
+import { useEffect, useRef, useState } from 'react';
+import { TableSkeleton } from '@/components/Loaders';
 import { apiFetch, apiFetchWithRetry } from '@/lib/api';
+import styles from './messages.module.css';
 
-type StoreOption = {
-  value: string;
-  label: string;
-};
-
-type EmployeeOption = {
-  employeeId: string;
-  fullName: string;
-  storeId: string;
-};
-
-type MessageRow = {
-  messageId: string;
-  title: string;
-  body: string;
-  emoji?: string;
-  imageUrl?: string | null;
-  styleVariant?: 'standard' | 'info' | 'success' | 'warning' | 'celebration' | 'memorial';
-  textFormat?: 'plain' | 'markdown';
-  actionLabel?: string | null;
-  actionUrl?: string | null;
-  category: string;
-  scope: 'organization' | 'store' | 'employee';
-  targetStoreId?: string | null;
-  targetEmployeeIds?: string[];
-  priority: 'normal' | 'high';
-  startsAt?: string;
-  expiresAt?: string | null;
-  createdAt?: string;
-  isActive?: boolean;
-};
-
-const categories = [
-  { value: 'general', label: 'General' },
-  { value: 'instruction', label: 'Instruction' },
-  { value: 'alert', label: 'Alert' },
-  { value: 'motivation', label: 'Motivation' },
-  { value: 'felicitation', label: 'Felicitation' },
-  { value: 'achievement', label: 'Achievement' },
-  { value: 'celebration', label: 'Celebration' },
-  { value: 'birthday', label: 'Birthday' },
-  { value: 'work_anniversary', label: 'Work Anniversary' },
-  { value: 'obituary', label: 'Obituary' },
-] as const;
-
-function getExpiryModeLabel(message: MessageRow) {
-  const startsAtValue = String(message.startsAt ?? '').trim();
-  const expiresAtValue = String(message.expiresAt ?? '').trim();
-
-  if (!expiresAtValue) {
-    return startsAtValue ? 'Scheduled / No expiry' : 'No auto expiry';
-  }
-
-  const startDate = startsAtValue ? new Date(startsAtValue) : new Date(message.createdAt ?? '');
-  const expiryDate = new Date(expiresAtValue);
-
-  if (Number.isNaN(startDate.getTime()) || Number.isNaN(expiryDate.getTime())) {
-    return 'Custom expiry';
-  }
-
-  const diffMs = expiryDate.getTime() - startDate.getTime();
-  const dayMs = 24 * 60 * 60 * 1000;
-  const diffDays = Math.round(diffMs / dayMs);
-
-  if (diffDays === 1) return '1 day preset';
-  if (diffDays === 3) return '3 days preset';
-  if (diffDays === 7) return '7 days preset';
-
-  return 'Custom expiry';
-}
-
-function getExpiryModeBadgeStyle(expiryMode: string) {
-  if (expiryMode === 'No auto expiry') {
-    return { border: '1px solid rgba(100,116,139,0.35)', background: 'rgba(100,116,139,0.12)', color: '#334155' };
-  }
-
-  if (expiryMode === 'Scheduled / No expiry') {
-    return { border: '1px solid rgba(14,116,144,0.35)', background: 'rgba(14,116,144,0.12)', color: '#0e7490' };
-  }
-
-  if (expiryMode === '1 day preset') {
-    return { border: '1px solid rgba(245,158,11,0.4)', background: 'rgba(245,158,11,0.12)', color: '#b45309' };
-  }
-
-  if (expiryMode === '3 days preset') {
-    return { border: '1px solid rgba(59,130,246,0.4)', background: 'rgba(59,130,246,0.12)', color: '#1d4ed8' };
-  }
-
-  if (expiryMode === '7 days preset') {
-    return { border: '1px solid rgba(16,185,129,0.4)', background: 'rgba(16,185,129,0.12)', color: '#047857' };
-  }
-
-  return { border: '1px solid rgba(168,85,247,0.4)', background: 'rgba(168,85,247,0.12)', color: '#7e22ce' };
+type Store = { _id?: string; id?: string; name: string; isActive?: boolean; isDeleted?: boolean; deletedAt?: string };
+type User = { _id?: string; id?: string; employeeId?: string; firstName?: string; lastName?: string; storeId?: string; isActive?: boolean; isDeleted?: boolean; deletedAt?: string };
+type Message = { styleVariant?: string; emoji?: string; messageId: string; title: string; body: string; scope: string; targetStoreId?: string; targetEmployeeIds?: string[]; startsAt?: string; expiresAt?: string; createdAt?: string };
+type Audience = 'organization' | 'store' | 'employee' | 'directors';
+const recipientId = (user: User) => String(user.employeeId || user._id || user.id || '').trim();
+const userName = (user: User) => [user.firstName, user.lastName].filter(Boolean).join(' ') || recipientId(user);
+const storeId = (store: Store) => String(store._id || store.id || '');
+const active = (record: User | Store) => record.isActive !== false && !record.isDeleted && !record.deletedAt;
+const initialForm = { audience: 'employee' as Audience, store: '', recipient: '', title: '', body: '', styleVariant: 'standard', category: 'general', priority: 'normal', startsAt: '', expiresAt: '' };
+const audienceChoices: { value: Audience; title: string; help: string }[] = [
+  { value: 'employee', title: 'One staff member', help: 'Choose a store, then a person' },
+  { value: 'store', title: 'A whole store', help: 'Everyone working at one store' },
+  { value: 'organization', title: 'Everyone', help: 'All users, including directors' },
+  { value: 'directors', title: 'Directors', help: 'One director or all directors' },
+];
+const messageStyles = [
+  { value: 'standard', label: 'General update', emoji: '💬', category: 'general', priority: 'normal', help: 'A simple everyday message.', example: 'Share an update with your team.' },
+  { value: 'celebration', label: 'Celebration', emoji: '🎉', category: 'celebration', priority: 'normal', help: 'Celebrate a special occasion together.', example: 'Tell your team what you’re celebrating and how to join in.' },
+  { value: 'warning', label: 'Warning', emoji: '⚠️', category: 'alert', priority: 'high', help: 'Highlight a risk or something to be careful about.', example: 'Explain the risk and what people should do to stay safe.' },
+  { value: 'alert', label: 'Alert', emoji: '🚨', category: 'alert', priority: 'high', help: 'Make an important notice stand out.', example: 'Explain what has changed and who needs to know.' },
+  { value: 'urgent', label: 'Quick action needed', emoji: '⏰', category: 'instruction', priority: 'high', help: 'Make the next step and deadline clear.', example: 'What needs to be done? By when? Who should take action?' },
+  { value: 'memorial', label: 'Bereavement', emoji: '🕊️', category: 'obituary', priority: 'normal', help: 'A quiet, respectful message of remembrance.', example: 'Share your condolences and any arrangements the team should know about.' },
+  { value: 'achievement', label: 'Achievement', emoji: '🏆', category: 'achievement', priority: 'normal', help: 'Recognize a milestone or outstanding result.', example: 'Share the achievement and recognize the people behind it.' },
+  { value: 'felicitation', label: 'Felicitation', emoji: '👏', category: 'felicitation', priority: 'normal', help: 'Congratulate someone on their success.', example: 'Who are you congratulating, and what have they accomplished?' },
+  { value: 'encouragement', label: 'Encouragement', emoji: '💪', category: 'motivation', priority: 'normal', help: 'Lift spirits and encourage your team.', example: 'Recognize their effort and share a few words of encouragement.' },
+  { value: 'guidelines', label: 'Guidelines', emoji: '📋', category: 'instruction', priority: 'normal', help: 'Share clear instructions people can follow.', example: 'Write the steps to follow, one per line. Include who to contact for help.' },
+];
+const getMessageStyle = (value?: string) => messageStyles.find(style => style.value === value) || messageStyles[0];
+const emojiGroups = [
+  { label: 'Everyday', items: [['😊', 'Smile'], ['😀', 'Happy'], ['😄', 'Big smile'], ['😉', 'Wink'], ['❤️', 'Heart'], ['👍', 'Thumbs up'], ['👏', 'Applause'], ['🙏', 'Thank you']] },
+  { label: 'Celebrate', items: [['🎉', 'Celebration'], ['🎊', 'Confetti'], ['🎂', 'Birthday cake'], ['🎈', 'Balloon'], ['🎁', 'Gift'], ['🏆', 'Trophy'], ['🌟', 'Shining star'], ['🥳', 'Party face']] },
+  { label: 'Work & updates', items: [['📢', 'Announcement'], ['📌', 'Pin'], ['📅', 'Calendar'], ['⏰', 'Reminder'], ['✅', 'Done'], ['⚠️', 'Attention'], ['💡', 'Idea'], ['🎯', 'Goal']] },
+  { label: 'Encouragement', items: [['💪', 'Strength'], ['🤝', 'Teamwork'], ['🙌', 'Well done'], ['✨', 'Sparkles'], ['🚀', 'Rocket'], ['💯', 'Excellent'], ['🌷', 'Flower'], ['🕊️', 'Peace']] },
+];
+function Icon({ name }: { name: 'employee' | 'store' | 'organization' | 'directors' | 'send' | 'message' | 'search' }) {
+  const paths = {
+    employee: 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M20 8v6m-3-3h6',
+    store: 'M3 10v11h18V10M2 10l3-7h14l3 7M2 10h20M9 21v-7h6v7',
+    organization: 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75',
+    directors: 'M12 3l3 6 6 .9-4.5 4.4 1 6.2-5.5-3-5.5 3 1-6.2L3 9.9 9 9z',
+    send: 'M22 2L9 15M22 2l-7 20-6-7-7-6 20-7z',
+    message: 'M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9H13a8.5 8.5 0 0 1 8 8v.5z',
+    search: 'M21 21l-6-6M17 10a7 7 0 1 1-14 0 7 7 0 0 1 14 0',
+  };
+  return <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={paths[name]} /></svg>;
 }
 
 export default function MessagesPage() {
-  const [isLoading, setIsLoading] = useState(true);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [statusMessage, setStatusMessage] = useState('');
-  const [errorMessage, setErrorMessage] = useState('');
-  const [stores, setStores] = useState<StoreOption[]>([]);
-  const [employees, setEmployees] = useState<EmployeeOption[]>([]);
-  const [messages, setMessages] = useState<MessageRow[]>([]);
+  const [stores, setStores] = useState<Store[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
+  const [directors, setDirectors] = useState<User[]>([]);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [ready, setReady] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState('');
+  const [historyError, setHistoryError] = useState('');
+  const [success, setSuccess] = useState('');
+  const [search, setSearch] = useState('');
+  const [historyLoading, setHistoryLoading] = useState(true);
+  const [form, setForm] = useState(initialForm);
+  const messageInput = useRef<HTMLTextAreaElement>(null);
+  const emojiPicker = useRef<HTMLDetailsElement>(null);
+  const [emojiNotice, setEmojiNotice] = useState('');
 
-  const [form, setForm] = useState({
-    title: '',
-    body: '',
-    emoji: '',
-    imageUrl: '',
-    styleVariant: 'standard' as 'standard' | 'info' | 'success' | 'warning' | 'celebration' | 'memorial',
-    textFormat: 'plain' as 'plain' | 'markdown',
-    actionLabel: '',
-    actionUrl: '',
-    category: 'general',
-    scope: 'organization' as 'organization' | 'store' | 'employee',
-    targetStoreId: '',
-    targetEmployeeId: '',
-    priority: 'normal' as 'normal' | 'high',
-    expiryPreset: 'none' as 'none' | '1d' | '3d' | '7d' | 'custom',
-    startsAt: '',
-    expiresAt: '',
-  });
-
-  const visibleEmployees = useMemo(() => {
-    if (form.scope !== 'employee') {
-      return employees;
+  function insertEmoji(emoji: string) {
+    const input = messageInput.current;
+    if (!input || sending || !ready) return;
+    const start = input.selectionStart;
+    const end = input.selectionEnd;
+    const body = form.body.slice(0, start) + emoji + form.body.slice(end);
+    if (body.length > 2000) {
+      setEmojiNotice('Your message is full. Remove a little text to add an emoji.');
+      return;
     }
+    setForm(current => ({ ...current, body }));
+    setEmojiNotice('');
+    if (emojiPicker.current) emojiPicker.current.open = false;
+    requestAnimationFrame(() => {
+      input.focus();
+      input.setSelectionRange(start + emoji.length, start + emoji.length);
+    });
+  }
 
-    if (!form.targetStoreId) {
-      return employees;
-    }
 
-    return employees.filter((item) => item.storeId === form.targetStoreId);
-  }, [employees, form.scope, form.targetStoreId]);
-
-  const loadMessagesData = async () => {
-    setIsLoading(true);
-    setErrorMessage('');
-
+  async function loadHistory() {
+    setHistoryError('');
+    setHistoryLoading(true);
+    try { setMessages(await apiFetchWithRetry<Message[]>('/accounting/messages?limit=50')); }
+    catch { setHistoryError('We couldn’t load your earlier messages. Please try again.'); }
+    finally { setHistoryLoading(false); }
+  }
+  async function loadRecipients() {
+    setLoading(true);
+    setReady(false);
+    setError('');
     try {
-      const [storeEntries, employeeEntries, messageEntries] = await Promise.all([
-        apiFetchWithRetry<Array<{ _id?: string; id?: string; name?: string }>>('/stores'),
-        apiFetchWithRetry<Array<{ employeeId?: string; employeeCode?: string; firstName?: string; lastName?: string; storeId?: string }>>('/employees'),
-        apiFetchWithRetry<MessageRow[]>('/accounting/messages?limit=50'),
+      const [storeRows, userRows, directorRows] = await Promise.all([
+        apiFetchWithRetry<Store[]>('/stores'),
+        apiFetchWithRetry<User[]>('/users'),
+        apiFetchWithRetry<User[]>('/users/directors'),
       ]);
+      setStores(storeRows.filter(active).sort((a, b) => a.name.localeCompare(b.name)));
+      setUsers(userRows.filter(user => active(user) && recipientId(user)).sort((a, b) => userName(a).localeCompare(userName(b))));
+      setDirectors(directorRows.filter(user => active(user) && recipientId(user)).sort((a, b) => userName(a).localeCompare(userName(b))));
+      setReady(true);
+    } catch { setError('We couldn’t load the list of people and stores. Please try again.'); }
+    finally { setLoading(false); }
+  }
+  useEffect(() => { void loadRecipients(); void loadHistory(); }, []);
 
-      const storeOptions = (Array.isArray(storeEntries) ? storeEntries : [])
-        .map((store) => ({
-          value: String(store?._id ?? store?.id ?? '').trim(),
-          label: String(store?.name ?? '').trim(),
-        }))
-        .filter((item) => item.value && item.label);
+  const selectedStyle = getMessageStyle(form.styleVariant);
+  const staff = users.filter(user => String(user.storeId || '') === form.store);
+  const recipients = form.audience === 'directors' ? directors : staff;
+  const selected = recipients.find(user => recipientId(user) === form.recipient);
+  const audienceLabel = form.audience === 'organization' ? 'Everyone in the organization'
+    : form.audience === 'directors' && !form.recipient ? `All directors (${directors.length})`
+    : form.audience === 'employee' ? (selected ? userName(selected) : 'Choose a store and a staff member')
+    : selected ? userName(selected)
+    : stores.find(store => storeId(store) === form.store)?.name || 'Choose who to send this to';
 
-      const employeeOptions = (Array.isArray(employeeEntries) ? employeeEntries : [])
-        .map((entry) => {
-          const employeeId = String(entry?.employeeId ?? entry?.employeeCode ?? '').trim();
-          if (!employeeId) {
-            return null;
-          }
-
-          return {
-            employeeId,
-            fullName: `${String(entry?.firstName ?? '').trim()} ${String(entry?.lastName ?? '').trim()}`.trim() || employeeId,
-            storeId: String(entry?.storeId ?? '').trim(),
-          } satisfies EmployeeOption;
-        })
-        .filter((entry): entry is EmployeeOption => Boolean(entry));
-
-      setStores(storeOptions);
-      setEmployees(employeeOptions);
-      setMessages(Array.isArray(messageEntries) ? messageEntries : []);
-
-      setForm((current) => ({
-        ...current,
-        targetStoreId: current.targetStoreId || storeOptions[0]?.value || '',
-        targetEmployeeId: current.targetEmployeeId || employeeOptions[0]?.employeeId || '',
-      }));
-    } catch {
-      setErrorMessage('Unable to load messaging data.');
-      setStores([]);
-      setEmployees([]);
-      setMessages([]);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    void loadMessagesData();
-  }, []);
-
-  const handleSendMessage = async () => {
-    setStatusMessage('');
-    setErrorMessage('');
-
-    const title = form.title.trim();
-    const body = form.body.trim();
-
-    if (!title || !body) {
-      setErrorMessage('Title and message are required.');
-      return;
-    }
-
-    if (form.scope === 'store' && !form.targetStoreId) {
-      setErrorMessage('Select a target store for store-wide messages.');
-      return;
-    }
-
-    if (form.scope === 'employee' && !form.targetEmployeeId) {
-      setErrorMessage('Select an employee for individual message.');
-      return;
-    }
-
-    setIsSubmitting(true);
-
+  async function sendMessage(event: React.FormEvent) {
+    event.preventDefault();
+    if (sending || !ready) return;
+    setError(''); setSuccess('');
+    if (!form.title.trim() || !form.body.trim()) { setError('Enter a title and message.'); return; }
+    if ((form.audience === 'store' || form.audience === 'employee') && !stores.some(store => storeId(store) === form.store)) { setError('Select a store.'); return; }
+    if (form.audience === 'employee' && !selected) { setError('Select a staff member in this store.'); return; }
+    if (form.audience === 'directors' && (!directors.length || (form.recipient && !selected))) { setError('Select an available director.'); return; }
+    const start = form.startsAt ? new Date(form.startsAt) : new Date();
+    const expiry = form.expiresAt ? new Date(form.expiresAt) : null;
+    if (Number.isNaN(start.getTime()) || (expiry && (Number.isNaN(expiry.getTime()) || expiry <= start))) { setError('Choose a hide date that is later than the send date.'); return; }
+    setSending(true);
     try {
-      const startsAtDate = form.startsAt ? new Date(form.startsAt) : new Date();
-      const baseStart = Number.isNaN(startsAtDate.getTime()) ? new Date() : startsAtDate;
+      await apiFetch('/accounting/messages', { method: 'POST', body: JSON.stringify({
+        title: form.title.trim(), body: form.body.trim(), category: form.category, priority: form.priority,
+        styleVariant: form.styleVariant, emoji: form.styleVariant === 'standard' ? undefined : selectedStyle.emoji,
+        scope: form.audience === 'directors' ? 'employee' : form.audience,
+        targetStoreId: form.audience === 'store' ? form.store : undefined,
+        targetEmployeeIds: form.audience === 'employee' ? [form.recipient] : form.audience === 'directors' ? (form.recipient ? [form.recipient] : directors.map(recipientId)) : undefined,
+        startsAt: start.toISOString(), expiresAt: expiry?.toISOString(),
+      }) });
+      setSuccess(`${form.startsAt && start > new Date() ? 'Message scheduled' : 'Message sent'} to ${audienceLabel}.`);
+      setForm(initialForm);
+      setEmojiNotice('');
+      if (emojiPicker.current) emojiPicker.current.open = false;
+      await loadHistory();
+    } catch { setError('Your message wasn’t sent. Your text is still here. Please try again.'); }
+    finally { setSending(false); }
+  }
 
-      let computedExpiresAt: string | undefined;
-      if (form.expiryPreset === 'custom') {
-        computedExpiresAt = form.expiresAt ? new Date(form.expiresAt).toISOString() : undefined;
-      } else if (form.expiryPreset === '1d' || form.expiryPreset === '3d' || form.expiryPreset === '7d') {
-        const days = form.expiryPreset === '1d' ? 1 : form.expiryPreset === '3d' ? 3 : 7;
-        computedExpiresAt = new Date(baseStart.getTime() + days * 24 * 60 * 60 * 1000).toISOString();
-      }
+  function describeRecipients(message: Message) {
+    if (message.scope === 'organization') return 'Everyone in the organization';
+    if (message.scope === 'store') return stores.find(store => storeId(store) === message.targetStoreId)?.name || message.targetStoreId || 'Store';
+    return (message.targetEmployeeIds || []).map(id => {
+      const user = [...users, ...directors].find(entry => recipientId(entry) === id);
+      return user ? userName(user) : id;
+    }).join(', ');
+  }
 
-      await apiFetch('/accounting/messages', {
-        method: 'POST',
-        body: JSON.stringify({
-          title,
-          body,
-          emoji: form.emoji || undefined,
-          imageUrl: form.imageUrl || undefined,
-          styleVariant: form.styleVariant,
-          textFormat: form.textFormat,
-          actionLabel: form.actionLabel || undefined,
-          actionUrl: form.actionUrl || undefined,
-          category: form.category,
-          scope: form.scope,
-          targetStoreId: form.scope === 'store' || form.scope === 'employee' ? form.targetStoreId || undefined : undefined,
-          targetEmployeeIds: form.scope === 'employee' ? [form.targetEmployeeId] : undefined,
-          priority: form.priority,
-          startsAt: form.startsAt ? baseStart.toISOString() : undefined,
-          expiresAt: computedExpiresAt,
-        }),
-      });
+  const visibleMessages = messages.filter(message => `${message.title} ${message.body} ${describeRecipients(message)}`.toLowerCase().includes(search.toLowerCase()));
+  const canSend = ready && !sending && Boolean(form.title.trim() && form.body.trim()) && (form.audience !== 'employee' || Boolean(selected)) && (form.audience !== 'store' || Boolean(form.store)) && (form.audience !== 'directors' || directors.length > 0);
 
-      setStatusMessage('Message saved. It will appear in the selected employees’ mobile feed during its scheduled dates.');
-      setForm((current) => ({
-        ...current,
-        title: '',
-        body: '',
-        emoji: '',
-        imageUrl: '',
-        actionLabel: '',
-        actionUrl: '',
-        expiryPreset: 'none',
-        expiresAt: '',
-      }));
-      await loadMessagesData();
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : 'Failed to send message.');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  return (
-    <main className="portal-page">
-
-      {statusMessage && (
-        <div style={{ marginBottom: 14, padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(16,185,129,0.35)', background: 'rgba(16,185,129,0.08)', color: '#047857', fontWeight: 700 }}>
-          {statusMessage}
-        </div>
-      )}
-      {errorMessage && (
-        <div style={{ marginBottom: 14, padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(239,68,68,0.35)', background: 'rgba(239,68,68,0.08)', color: '#b91c1c', fontWeight: 700 }}>
-          {errorMessage}
-        </div>
-      )}
-
-      <section className="card" style={{ padding: 18, marginBottom: 20 }}>
-        <h2 style={{ marginTop: 0, marginBottom: 12, fontSize: 18 }}>Send Message</h2>
-
-        <div style={{ display: 'grid', gap: 10 }}>
-          <input
-            value={form.title}
-            onChange={(event) => setForm((current) => ({ ...current, title: event.target.value }))}
-            placeholder="Message title"
-            style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(148,163,184,0.35)' }}
-          />
-
-          <textarea
-            value={form.body}
-            onChange={(event) => setForm((current) => ({ ...current, body: event.target.value }))}
-            placeholder="Write message content"
-            rows={5}
-            style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(148,163,184,0.35)', resize: 'vertical' }}
-          />
-
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 10 }}>
-            <label style={{ display: 'grid', gap: 6, fontWeight: 700 }}>
-              Emoji (optional)
-              <input
-                value={form.emoji}
-                onChange={(event) => setForm((current) => ({ ...current, emoji: event.target.value }))}
-                placeholder="🎉"
-                style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(148,163,184,0.35)' }}
-              />
-            </label>
-
-            <label style={{ display: 'grid', gap: 6, fontWeight: 700 }}>
-              Style Variant
-              <select
-                value={form.styleVariant}
-                onChange={(event) => setForm((current) => ({ ...current, styleVariant: event.target.value as 'standard' | 'info' | 'success' | 'warning' | 'celebration' | 'memorial' }))}
-                style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(148,163,184,0.35)' }}
-              >
-                <option value="standard">Standard</option>
-                <option value="info">Info</option>
-                <option value="success">Success</option>
-                <option value="warning">Warning</option>
-                <option value="celebration">Celebration</option>
-                <option value="memorial">Memorial</option>
-              </select>
-            </label>
-
-            <label style={{ display: 'grid', gap: 6, fontWeight: 700 }}>
-              Text Format
-              <select
-                value={form.textFormat}
-                onChange={(event) => setForm((current) => ({ ...current, textFormat: event.target.value as 'plain' | 'markdown' }))}
-                style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(148,163,184,0.35)' }}
-              >
-                <option value="plain">Plain</option>
-                <option value="markdown">Markdown</option>
-              </select>
-            </label>
+  return <main className={`portal-page ${styles.page}`}>
+    <header className={styles.pageHeader}>
+      <div><span className={styles.eyebrow}>TEAM COMMUNICATION</span><h2>A little update. A connected team.</h2><p>Send the right message to the right people.</p></div>
+      <span className={styles.channel}><span /> Delivered in the app</span>
+    </header>
+    {success && <p role="status" className={styles.success}>{success}</p>}
+    {error && <p role="alert" className={styles.error}>{error} {!ready && !loading && <button type="button" onClick={() => void loadRecipients()}>Try again</button>}</p>}
+    <form onSubmit={sendMessage} className={styles.workspace}>
+      <section className={styles.composer} aria-labelledby="compose-title">
+        <div className={styles.sectionHeader}><span className={styles.headingIcon}><Icon name="message" /></span><div><h2 id="compose-title">New message</h2><p>A quick note, an important update, or a thank you.</p></div></div>
+        <fieldset disabled={loading || sending || !ready} className={styles.formFields}>
+          <fieldset className={styles.audience}>
+            <legend className={styles.label}>Who would you like to message?</legend>
+            <div className={styles.choices}>
+              {audienceChoices.map(choice => <label key={choice.value} className={`${styles.choice} ${form.audience === choice.value ? styles.selected : ''}`} title={choice.help}>
+                <input type="radio" name="audience" value={choice.value} checked={form.audience === choice.value} onChange={() => setForm(current => ({ ...current, audience: choice.value, store: '', recipient: '' }))} />
+                <Icon name={choice.value} /><strong>{choice.title}</strong>
+              </label>)}
+            </div>
+            <p className={styles.choiceHint}>{audienceChoices.find(choice => choice.value === form.audience)?.help}.</p>
+          </fieldset>
+          <div className={styles.recipientFields}>
+          {(form.audience === 'employee' || form.audience === 'store') && <label className={styles.field}>Which store?
+            <select required className={styles.input} value={form.store} onChange={event => setForm(current => ({ ...current, store: event.target.value, recipient: '' }))}>
+              <option value="">Select a store</option>{stores.map(store => <option key={storeId(store)} value={storeId(store)}>{store.name}</option>)}
+            </select>{!stores.length && <small>There are no stores to choose from. Ask your administrator to add a store.</small>}
+          </label>}
+          {(form.audience === 'employee' || form.audience === 'directors') && <label className={styles.field}>{form.audience === 'directors' ? 'Which director?' : 'Which staff member?'}
+            <select required={form.audience === 'employee'} disabled={form.audience === 'employee' && !form.store} className={styles.input} value={form.recipient} onChange={event => setForm(current => ({ ...current, recipient: event.target.value }))}>
+              <option value="">{form.audience === 'directors' ? `All directors (${directors.length})` : form.store ? 'Choose a name' : 'Choose a store first'}</option>
+              {recipients.map(user => <option key={recipientId(user)} value={recipientId(user)}>{userName(user)}{user.employeeId ? ` · ${user.employeeId}` : ''}</option>)}
+            </select>{!recipients.length && (form.store || form.audience === 'directors') && <small>No people are listed here. Ask your administrator to check their account and store details.</small>}
+          </label>}
           </div>
-
-          <input
-            value={form.imageUrl}
-            onChange={(event) => setForm((current) => ({ ...current, imageUrl: event.target.value }))}
-            placeholder="Image URL (optional)"
-            style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(148,163,184,0.35)' }}
-          />
-
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 10 }}>
-            <input
-              value={form.actionLabel}
-              onChange={(event) => setForm((current) => ({ ...current, actionLabel: event.target.value }))}
-              placeholder="Action label (optional)"
-              style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(148,163,184,0.35)' }}
-            />
-            <input
-              value={form.actionUrl}
-              onChange={(event) => setForm((current) => ({ ...current, actionUrl: event.target.value }))}
-              placeholder="Action URL (optional)"
-              style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(148,163,184,0.35)' }}
-            />
+          <fieldset className={styles.audience}>
+            <legend className={styles.label}>Choose a message style</legend>
+            <div className={styles.styleChoices}>
+              {messageStyles.map(style => <label key={style.value} data-variant={style.value} className={`${styles.styleChoice} ${form.styleVariant === style.value ? styles.styleSelected : ''}`}>
+                <input type="radio" name="message-style" value={style.value} checked={form.styleVariant === style.value} onChange={() => setForm(current => ({ ...current, styleVariant: style.value, category: style.category, priority: style.priority }))} />
+                <span aria-hidden="true">{style.emoji}</span>{style.label}
+              </label>)}
+            </div>
+            <p className={styles.choiceHint}>{selectedStyle.help}</p>
+          </fieldset>
+          <div className={styles.writing}>
+            <label className={styles.field}>Subject<input required maxLength={120} className={styles.input} placeholder="e.g. Team meeting tomorrow" value={form.title} onChange={event => setForm(current => ({ ...current, title: event.target.value }))} /></label>
+            <label className={styles.field}><span className={styles.fieldHeading}>Your message <span>{form.body.length.toLocaleString()} / 2,000</span></span><textarea ref={messageInput} required maxLength={2000} rows={6} className={styles.input} placeholder={selectedStyle.example} value={form.body} onChange={event => setForm(current => ({ ...current, body: event.target.value }))} /></label>
+            <div className={styles.emojiToolbar}>
+              <details ref={emojiPicker} className={styles.emojiPicker} onKeyDown={event => {
+                if (event.key === 'Escape') {
+                  event.preventDefault();
+                  event.currentTarget.open = false;
+                  event.currentTarget.querySelector('summary')?.focus();
+                }
+              }}>
+                <summary><span aria-hidden="true">😊</span> Add emoji</summary>
+                <div className={styles.emojiPanel}>
+                  <div className={styles.emojiHeader}><strong>Choose an emoji</strong><span>Click to add to your message</span></div>
+                  {emojiGroups.map(group => <section key={group.label} aria-label={group.label}>
+                    <h4>{group.label}</h4>
+                    <div className={styles.emojiGrid}>{group.items.map(([emoji, label]) => <button key={label} type="button" title={label} aria-label={`Add ${label.toLowerCase()} emoji`} onClick={() => insertEmoji(emoji)}>{emoji}</button>)}</div>
+                  </section>)}
+                </div>
+              </details>
+              <span className={styles.emojiHint}>Add a personal touch.</span>
+            </div>
+            {emojiNotice && <p role="status" className={styles.hint}>{emojiNotice}</p>}
           </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 10 }}>
-            <label style={{ display: 'grid', gap: 6, fontWeight: 700 }}>
-              Category
-              <select
-                value={form.category}
-                onChange={(event) => setForm((current) => ({ ...current, category: event.target.value }))}
-                style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(148,163,184,0.35)' }}
-              >
-                {categories.map((category) => (
-                  <option key={category.value} value={category.value}>{category.label}</option>
-                ))}
-              </select>
-            </label>
-
-            <label style={{ display: 'grid', gap: 6, fontWeight: 700 }}>
-              Scope
-              <select
-                value={form.scope}
-                onChange={(event) => {
-                  const scope = event.target.value as 'organization' | 'store' | 'employee';
-                  setForm((current) => ({
-                    ...current,
-                    scope,
-                  }));
-                }}
-                style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(148,163,184,0.35)' }}
-              >
-                <option value="organization">Organization Wide</option>
-                <option value="store">Store Wide</option>
-                <option value="employee">Individual Employee</option>
-              </select>
-            </label>
-
-            <label style={{ display: 'grid', gap: 6, fontWeight: 700 }}>
-              Priority
-              <select
-                value={form.priority}
-                onChange={(event) => setForm((current) => ({ ...current, priority: event.target.value as 'normal' | 'high' }))}
-                style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(148,163,184,0.35)' }}
-              >
-                <option value="normal">Normal</option>
-                <option value="high">High</option>
-              </select>
-            </label>
-
-            <label style={{ display: 'grid', gap: 6, fontWeight: 700 }}>
-              Auto Expiry
-              <select
-                value={form.expiryPreset}
-                onChange={(event) => {
-                  const preset = event.target.value as 'none' | '1d' | '3d' | '7d' | 'custom';
-                  setForm((current) => ({
-                    ...current,
-                    expiryPreset: preset,
-                    expiresAt: preset === 'custom' ? current.expiresAt : '',
-                  }));
-                }}
-                style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(148,163,184,0.35)' }}
-              >
-                <option value="none">No auto expiry</option>
-                <option value="1d">Expire in 1 day</option>
-                <option value="3d">Expire in 3 days</option>
-                <option value="7d">Expire in 7 days</option>
-                <option value="custom">Custom expiry</option>
-              </select>
-            </label>
-          </div>
-
-          {(form.scope === 'store' || form.scope === 'employee') && (
-            <label style={{ display: 'grid', gap: 6, fontWeight: 700 }}>
-              Target Store
-              <select
-                value={form.targetStoreId}
-                onChange={(event) => setForm((current) => ({ ...current, targetStoreId: event.target.value }))}
-                style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(148,163,184,0.35)' }}
-              >
-                {stores.map((store) => (
-                  <option key={store.value} value={store.value}>{store.label}</option>
-                ))}
-              </select>
-            </label>
-          )}
-
-          {form.scope === 'employee' && (
-            <label style={{ display: 'grid', gap: 6, fontWeight: 700 }}>
-              Employee
-              <select
-                value={form.targetEmployeeId}
-                onChange={(event) => setForm((current) => ({ ...current, targetEmployeeId: event.target.value }))}
-                style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(148,163,184,0.35)' }}
-              >
-                {visibleEmployees.map((employee) => (
-                  <option key={employee.employeeId} value={employee.employeeId}>
-                    {employee.employeeId} · {employee.fullName}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
-
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))', gap: 10 }}>
-            <label style={{ display: 'grid', gap: 6, fontWeight: 700 }}>
-              Starts At (optional)
-              <input
-                type="datetime-local"
-                value={form.startsAt}
-                onChange={(event) => setForm((current) => ({ ...current, startsAt: event.target.value }))}
-                style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(148,163,184,0.35)' }}
-              />
-            </label>
-            <label style={{ display: 'grid', gap: 6, fontWeight: 700 }}>
-              Expires At (optional)
-              <input
-                type="datetime-local"
-                value={form.expiresAt}
-                onChange={(event) => setForm((current) => ({ ...current, expiresAt: event.target.value }))}
-                disabled={form.expiryPreset !== 'custom'}
-                style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(148,163,184,0.35)' }}
-              />
-            </label>
-          </div>
-
-          <button type="button" className="btn primary" onClick={handleSendMessage} disabled={isSubmitting}>
-            {isSubmitting ? 'Sending...' : 'Send Message'}
-          </button>
-        </div>
+          <details className={styles.options}><summary>Schedule & more options <span>Optional</span></summary>
+            <div className={styles.optionsGrid}>
+              <label className={styles.field}>How important is it?<select className={styles.input} value={form.priority} onChange={event => setForm(current => ({ ...current, priority: event.target.value }))}><option value="normal">Normal</option><option value="high">Important</option></select></label>
+              <label className={styles.field}>Send later<input type="datetime-local" className={styles.input} value={form.startsAt} onChange={event => setForm(current => ({ ...current, startsAt: event.target.value }))} /><small className={styles.hint}>Leave blank to send right away.</small></label>
+              <label className={styles.field}>Hide from the app after<input type="datetime-local" className={styles.input} value={form.expiresAt} onChange={event => setForm(current => ({ ...current, expiresAt: event.target.value }))} /><small className={styles.hint}>Leave blank to keep the message visible.</small></label>
+            </div>
+          </details>
+        </fieldset>
+        <footer className={styles.composerFooter}>
+          <div><strong>{form.startsAt ? 'Send later' : 'Ready when you are'}</strong><p>{loading ? 'Loading people and stores…' : !ready ? 'Reload the recipient list to continue.' : !canSend ? 'Choose your recipients and write a message.' : 'Your message is ready to send.'}</p></div>
+          <button className={styles.sendButton} type="submit" disabled={!canSend}><Icon name="send" />{sending ? 'Sending…' : form.startsAt ? 'Schedule message' : 'Send message'}</button>
+        </footer>
       </section>
-
-      <section className="card" style={{ padding: 18 }}>
-        <h2 style={{ marginTop: 0, marginBottom: 12, fontSize: 18 }}>Sent Messages</h2>
-
-        {isLoading ? (
-          <TableSkeleton columns={8} rows={5} />
-        ) : messages.length > 0 ? (
-          <div style={{ overflowX: 'auto' }}>
-            <table className="table" style={{ minWidth: 1240 }}>
-              <thead>
-                <tr>
-                  <th>Title</th>
-                  <th>Category</th>
-                  <th>Style</th>
-                  <th>Scope</th>
-                  <th>Target</th>
-                  <th>Priority</th>
-                  <th>Expiry Mode</th>
-                  <th>Created</th>
-                </tr>
-              </thead>
-              <tbody>
-                {messages.map((message) => {
-                  const expiryMode = getExpiryModeLabel(message);
-                  return (
-                  <tr key={message.messageId}>
-                    <td>
-                      <div style={{ fontWeight: 700 }}>{`${message.emoji ? `${message.emoji} ` : ''}${message.title}`}</div>
-                      <div style={{ color: '#64748b', marginTop: 4 }}>{message.body}</div>
-                      {message.imageUrl ? (
-                        <div style={{ color: '#0f766e', marginTop: 4, fontWeight: 600 }}>Image attached</div>
-                      ) : null}
-                      {message.actionLabel ? (
-                        <div style={{ color: '#334155', marginTop: 4 }}>
-                          CTA: {message.actionLabel}
-                        </div>
-                      ) : null}
-                    </td>
-                    <td>{message.category}</td>
-                    <td>{`${message.styleVariant ?? 'standard'} / ${message.textFormat ?? 'plain'}`}</td>
-                    <td>{message.scope}</td>
-                    <td>
-                      {message.scope === 'organization'
-                        ? 'All employees'
-                        : message.scope === 'store'
-                          ? stores.find((store) => store.value === String(message.targetStoreId ?? ''))?.label || message.targetStoreId || 'Store'
-                          : (message.targetEmployeeIds || []).join(', ') || 'Employee'}
-                    </td>
-                    <td>{message.priority}</td>
-                    <td>
-                      <span
-                        style={{
-                          ...getExpiryModeBadgeStyle(expiryMode),
-                          display: 'inline-block',
-                          padding: '4px 10px',
-                          borderRadius: 999,
-                          fontWeight: 700,
-                          fontSize: 12,
-                          whiteSpace: 'nowrap',
-                        }}
-                      >
-                        {expiryMode}
-                      </span>
-                    </td>
-                    <td>{message.createdAt ? new Date(message.createdAt).toLocaleString() : '—'}</td>
-                  </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <EmptyState title="No messages yet" description="Use the form above to send the first organization, store, or employee message." />
-        )}
-      </section>
-    </main>
-  );
+      <aside className={styles.previewPanel} aria-label="Message preview">
+        <div className={styles.previewHeading}><span className={styles.eyebrow}>LIVE PREVIEW</span><span className={styles.previewDot} /></div>
+        <h3>Here’s how it will look</h3><p className={styles.hint}>A quick look before you send.</p>
+        <div className={styles.previewCard} data-variant={form.styleVariant}>
+          <div className={styles.previewSender}><span className={styles.avatar} aria-hidden="true">{selectedStyle.emoji}</span><div><strong>{selectedStyle.label}</strong><span>{form.startsAt ? 'Scheduled message' : 'New message'}</span></div>{form.priority === 'high' && <span className={styles.important}>Important</span>}</div>
+          <h4 className={!form.title ? styles.placeholder : ''}>{form.styleVariant !== 'standard' && `${selectedStyle.emoji} `}{form.title || 'Your subject goes here'}</h4>
+          <p className={!form.body ? styles.placeholder : ''}>{form.body || 'Start writing and your message will appear here.'}</p>
+        </div>
+        <dl className={styles.delivery}>
+          <div><dt>Sending to</dt><dd><Icon name={form.audience} /><span>{audienceLabel}</span></dd></div>
+          <div><dt>When</dt><dd>{form.startsAt ? new Date(form.startsAt).toLocaleString() : 'As soon as you press send'}</dd></div>
+          {form.expiresAt && <div><dt>Visible until</dt><dd>{new Date(form.expiresAt).toLocaleString()}</dd></div>}
+        </dl>
+        <p className={styles.previewNote}>Your team can read this message in their app.</p>
+      </aside>
+    </form>
+    <section className={styles.history} aria-labelledby="history-title">
+      <div className={styles.historyHeader}><div><h2 id="history-title">Sent messages <span>{messages.length}</span></h2><p>Your recent updates, all in one place.</p></div><label className={styles.search}><Icon name="search" /><input aria-label="Search sent messages" placeholder="Search messages…" value={search} onChange={event => setSearch(event.target.value)} /></label></div>
+      {historyError && <p role="alert" className={styles.error}>{historyError} <button type="button" onClick={() => void loadHistory()}>Try again</button></p>}
+      {historyLoading ? <TableSkeleton rows={3} columns={3} /> : visibleMessages.length ? <div className={styles.messageList}>{visibleMessages.map(message => {
+        const expired = message.expiresAt && new Date(message.expiresAt) <= new Date();
+        const scheduled = !expired && message.startsAt && new Date(message.startsAt) > new Date();
+        return <details key={message.messageId} className={styles.messageRow}>
+          <summary><span className={styles.messageIcon}><Icon name="message" /></span><span className={styles.messageText}><strong>{message.emoji && `${message.emoji} `}{message.title}</strong><span>To: {describeRecipients(message)}</span></span><span className={`${styles.badge} ${expired ? styles.expired : scheduled ? styles.scheduled : ''}`}>{expired ? 'Ended' : scheduled ? 'Scheduled' : 'Sent'}</span><time className={styles.messageDate}>{message.createdAt ? new Date(message.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}</time><span className={styles.chevron} aria-hidden="true">⌄</span></summary>
+          <div className={styles.messageBody} data-variant={message.styleVariant}><span className={styles.messageStyleLabel}>{getMessageStyle(message.styleVariant).label}</span><p>{message.body}</p>{scheduled && <small>Sends on {new Date(message.startsAt!).toLocaleString()}</small>}{message.expiresAt && <small>Visible until {new Date(message.expiresAt).toLocaleString()}</small>}</div>
+        </details>;
+      })}</div> : !historyError && <div className={styles.empty}><span><Icon name={search ? 'search' : 'message'} /></span><h3>{search ? 'No matching messages' : 'Your first message starts here'}</h3><p>{search ? 'Try another name or word.' : 'Send a note above. You’ll find it here when it’s sent.'}</p></div>}
+    </section>
+  </main>;
 }
