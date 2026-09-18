@@ -1,5 +1,7 @@
 'use client';
 
+import AdminWorkspace from '@/components/admin/AdminWorkspace';
+
 import { useEffect, useRef, useState } from 'react';
 import { TableSkeleton } from '@/components/Loaders';
 import { apiFetch, apiFetchWithRetry } from '@/lib/api';
@@ -168,7 +170,7 @@ export default function MessagesPage() {
   const visibleMessages = messages.filter(message => `${message.title} ${message.body} ${describeRecipients(message)}`.toLowerCase().includes(search.toLowerCase()));
   const canSend = ready && !sending && Boolean(form.title.trim() && form.body.trim()) && (form.audience !== 'employee' || Boolean(selected)) && (form.audience !== 'store' || Boolean(form.store)) && (form.audience !== 'directors' || directors.length > 0);
 
-  return <main className={`portal-page ${styles.page}`}>
+  return <AdminWorkspace>
     <header className={styles.pageHeader}>
       <div><span className={styles.eyebrow}>TEAM COMMUNICATION</span><h2>A little update. A connected team.</h2><p>Send the right message to the right people.</p></div>
       <span className={styles.channel}><span /> Delivered in the app</span>
@@ -277,5 +279,5 @@ export default function MessagesPage() {
         </details>;
       })}</div> : !historyError && <div className={styles.empty}><span><Icon name={search ? 'search' : 'message'} /></span><h3>{search ? 'No matching messages' : 'Your first message starts here'}</h3><p>{search ? 'Try another name or word.' : 'Send a note above. You’ll find it here when it’s sent.'}</p></div>}
     </section>
-  </main>;
+  </AdminWorkspace>;
 }

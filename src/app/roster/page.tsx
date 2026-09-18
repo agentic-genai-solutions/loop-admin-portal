@@ -1,7 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { apiFetchWithRetry } from '@/lib/api';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import WorkforceWorkspace from '@/components/workforce/WorkforceWorkspace';
+import { AdminDialog } from '@/components/admin/AdminWorkspace';
+import styles from '@/components/admin/admin.module.css';
+import workforce from '@/components/workforce/workforce.module.css';
+import { apiFetch, apiFetchWithRetry } from '@/lib/api';
 
 type StoreOption = {
   value: string;
@@ -107,21 +111,10 @@ function normalizeRoles(roleInput: unknown): string[] {
   return roles.map((entry) => String(entry ?? '').trim().toLowerCase()).filter(Boolean);
 }
 
-function getDesignationBadgeClass(designation: string) {
-  const normalized = designation.trim().toLowerCase();
-  if (!normalized) {
-    return 'info';
-  }
-
-  const firstCode = normalized.charCodeAt(0);
-  const mapped = firstCode % 4;
-  if (mapped === 0) return 'success';
-  if (mapped === 1) return 'info';
-  if (mapped === 2) return 'warning';
-  return 'danger';
-}
-
 export default function RosterPage() {
+  const saveLock = useRef(false);
+  const rosterRequest = useRef(0);
+  const [search, setSearch] = useState('');
   const [stores, setStores] = useState<StoreOption[]>([]);
   const [selectedStoreId, setSelectedStoreId] = useState('');
   const [selectedView, setSelectedView] = useState<RosterViewMode>('weekly');
@@ -162,7 +155,7 @@ export default function RosterPage() {
       setAssignedStoreId(currentStoreId);
       setIsStoreLocked(!canViewAllStores && Boolean(currentStoreId));
       setCanManagePolicy(canEditRoster);
-      setSelectedStoreId(currentStoreId);
+      setSelectedStoreId(canViewAllStores ? '' : currentStoreId);
     } catch {
       setAssignedStoreId('');
       setIsStoreLocked(false);
@@ -173,13 +166,14 @@ export default function RosterPage() {
 
   const effectiveStoreId = useMemo(() => (isStoreLocked ? assignedStoreId : selectedStoreId), [assignedStoreId, isStoreLocked, selectedStoreId]);
 
-  const loadRoster = useCallback(async () => {
+  const loadRoster = useCallback(async (preserveEdits = false) => {
+    const request = ++rosterRequest.current;
     setIsLoading(true);
     setErrorMessage('');
 
     try {
       const [storeData, rosterResponse] = await Promise.all([
-        apiFetchWithRetry<Array<{ _id?: string; id?: string; name?: string }>>('/stores').catch(() => []),
+        apiFetchWithRetry<Array<{ _id?: string; id?: string; name?: string }>>('/stores'),
         apiFetchWithRetry<RosterViewResponse>(`/admin/rosters?${new URLSearchParams({
           ...(effectiveStoreId ? { storeId: effectiveStoreId } : {}),
           view: selectedView,
@@ -187,6 +181,7 @@ export default function RosterPage() {
         }).toString()}`),
       ]);
 
+      if (request !== rosterRequest.current) return;
       const normalizedStores = (Array.isArray(storeData) ? storeData : [])
         .map((store) => ({
           value: String(store?._id ?? store?.id ?? '').trim(),
@@ -197,7 +192,8 @@ export default function RosterPage() {
 
       setStores(normalizedStores);
       setRosterData(rosterResponse);
-      setPolicyWorkingDays(Array.isArray(rosterResponse.policy?.workingDays) && rosterResponse.policy.workingDays.length > 0 ? rosterResponse.policy.workingDays : [1, 2, 3, 4, 5]);
+      if (!preserveEdits) {
+        setPolicyWorkingDays(Array.isArray(rosterResponse.policy?.workingDays) && rosterResponse.policy.workingDays.length > 0 ? rosterResponse.policy.workingDays : [1, 2, 3, 4, 5]);
       setPolicyExtraCashEnabled(Boolean(rosterResponse.policy?.extraCashEnabled ?? rosterResponse.policy?.sundayBonusEnabled ?? true));
       setPolicyExtraCashDays(
         Array.isArray(rosterResponse.policy?.extraCashDays) && rosterResponse.policy.extraCashDays.length > 0
@@ -206,6 +202,7 @@ export default function RosterPage() {
       );
       setPolicyExtraCashAmount(Number(rosterResponse.policy?.extraCashAmount ?? rosterResponse.policy?.sundayBonusAmount) || 0);
 
+      }
       const overrideMap: Record<string, boolean> = {};
       const employeeExtraMap: Record<string, number> = {};
       (rosterResponse.employees ?? []).forEach((employee) => {
@@ -216,19 +213,22 @@ export default function RosterPage() {
       });
 
       setInitialOverrides(overrideMap);
-      setDraftOverrides(overrideMap);
+      setDraftOverrides(current => preserveEdits ? { ...overrideMap, ...current } : overrideMap);
       setInitialEmployeeExtras(employeeExtraMap);
-      setDraftEmployeeExtras(employeeExtraMap);
+      setDraftEmployeeExtras(current => preserveEdits ? { ...employeeExtraMap, ...current } : employeeExtraMap);
     } catch (error) {
+      if (request !== rosterRequest.current) return;
       const message = error instanceof Error && error.message ? error.message : 'Unable to load roster data.';
       setErrorMessage(message);
-      setRosterData(null);
-      setInitialOverrides({});
-      setDraftOverrides({});
-      setInitialEmployeeExtras({});
-      setDraftEmployeeExtras({});
+      if (!preserveEdits) {
+        setRosterData(null);
+        setInitialOverrides({});
+        setDraftOverrides({});
+        setInitialEmployeeExtras({});
+        setDraftEmployeeExtras({});
+      }
     } finally {
-      setIsLoading(false);
+      if (request === rosterRequest.current) setIsLoading(false);
     }
   }, [effectiveStoreId, selectedDate, selectedView]);
 
@@ -253,6 +253,7 @@ export default function RosterPage() {
   };
 
   const savePolicy = async () => {
+    if (saveLock.current) return;
     if (policyWorkingDays.length === 0) {
       setErrorMessage('Select at least one default roster day.');
       return;
@@ -263,12 +264,13 @@ export default function RosterPage() {
       return;
     }
 
+    saveLock.current = true;
     setIsSavingPolicy(true);
     setErrorMessage('');
     setSuccessMessage('');
 
     try {
-      await apiFetchWithRetry('/admin/rosters/policy', {
+      await apiFetch('/admin/rosters/policy', {
         method: 'PUT',
         body: JSON.stringify({
           ...(effectiveStoreId ? { storeId: effectiveStoreId } : {}),
@@ -282,11 +284,12 @@ export default function RosterPage() {
       });
 
       setSuccessMessage(effectiveStoreId ? 'Store roster policy updated.' : 'Global roster policy updated.');
-      await loadRoster();
+      await loadRoster(true);
     } catch (error) {
       const message = error instanceof Error && error.message ? error.message : 'Unable to save roster policy.';
       setErrorMessage(message);
     } finally {
+      saveLock.current = false;
       setIsSavingPolicy(false);
     }
   };
@@ -329,20 +332,22 @@ export default function RosterPage() {
   }, [draftEmployeeExtras, initialEmployeeExtras]);
 
   const saveOverrides = async () => {
+    if (saveLock.current) return;
     if (pendingOverrideChanges.length === 0) {
       setSuccessMessage('No override changes to save.');
       setErrorMessage('');
       return;
     }
 
+    saveLock.current = true;
     setIsSavingOverrides(true);
     setErrorMessage('');
     setSuccessMessage('');
 
     try {
-      await Promise.all(
+      const results = await Promise.allSettled(
         pendingOverrideChanges.map((change) =>
-          apiFetchWithRetry('/admin/rosters/override', {
+          apiFetch('/admin/rosters/override', {
             method: 'PATCH',
             body: JSON.stringify({
               employeeId: change.employeeId,
@@ -354,12 +359,18 @@ export default function RosterPage() {
         ),
       );
 
+      const failures = results.filter(result => result.status === 'rejected');
+      if (failures.length) {
+        await loadRoster(true);
+        throw new Error(`${results.length - failures.length} changes saved; ${failures.length} could not be saved. Your remaining changes are kept. Try saving again.`);
+      }
       setSuccessMessage(`${pendingOverrideChanges.length} override change${pendingOverrideChanges.length === 1 ? '' : 's'} saved.`);
-      await loadRoster();
+      await loadRoster(true);
     } catch (error) {
       const message = error instanceof Error && error.message ? error.message : 'Unable to update roster override.';
       setErrorMessage(message);
     } finally {
+      saveLock.current = false;
       setIsSavingOverrides(false);
     }
   };
@@ -380,20 +391,22 @@ export default function RosterPage() {
   };
 
   const saveEmployeeExtras = async () => {
+    if (saveLock.current) return;
     if (pendingEmployeeExtraChanges.length === 0) {
       setSuccessMessage('No employee extra amount changes to save.');
       setErrorMessage('');
       return;
     }
 
+    saveLock.current = true;
     setIsSavingEmployeeExtras(true);
     setErrorMessage('');
     setSuccessMessage('');
 
     try {
-      await Promise.all(
+      const results = await Promise.allSettled(
         pendingEmployeeExtraChanges.map((change) =>
-          apiFetchWithRetry('/admin/rosters/employee-extra', {
+          apiFetch('/admin/rosters/employee-extra', {
             method: 'PATCH',
             body: JSON.stringify({
               employeeId: change.employeeId,
@@ -404,354 +417,84 @@ export default function RosterPage() {
         ),
       );
 
+      const failures = results.filter(result => result.status === 'rejected');
+      if (failures.length) {
+        await loadRoster(true);
+        throw new Error(`${results.length - failures.length} changes saved; ${failures.length} could not be saved. Your remaining changes are kept. Try saving again.`);
+      }
       setSuccessMessage(`${pendingEmployeeExtraChanges.length} employee extra amount change${pendingEmployeeExtraChanges.length === 1 ? '' : 's'} saved.`);
-      await loadRoster();
+      await loadRoster(true);
     } catch (error) {
       const message = error instanceof Error && error.message ? error.message : 'Unable to save employee extra amounts.';
       setErrorMessage(message);
     } finally {
+      saveLock.current = false;
       setIsSavingEmployeeExtras(false);
     }
   };
 
   const isProcessingSave = isSavingPolicy || isSavingOverrides || isSavingEmployeeExtras;
 
-  return (
-    <main className="portal-page portal-page-grid" style={{ display: 'grid', gap: 14 }}>
-      <div className="card" style={{ display: 'grid', gap: 14 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10, alignItems: 'end', minWidth: 'min(100%, 670px)' }}>
-            <label style={{ display: 'grid', gap: 6, fontSize: 13, fontWeight: 700, color: '#334155' }}>
-              Store Scope
-              <select
-                value={effectiveStoreId || ''}
-                onChange={(event) => setSelectedStoreId(event.target.value)}
-                disabled={isStoreLocked}
-                style={{ width: '100%', minWidth: 0, padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(148,163,184,0.35)', background: isStoreLocked ? 'rgba(241,245,249,0.9)' : '#fff' }}
-              >
-                <option value="">All Shops (Global Default)</option>
-                {stores.map((store) => (
-                  <option key={store.value} value={store.value}>{store.label}</option>
-                ))}
-              </select>
-            </label>
-
-            <label style={{ display: 'grid', gap: 6, fontSize: 13, fontWeight: 700, color: '#334155' }}>
-              View
-              <select
-                value={selectedView}
-                onChange={(event) => setSelectedView(event.target.value as RosterViewMode)}
-                style={{ width: '100%', minWidth: 0, padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(148,163,184,0.35)' }}
-              >
-                <option value="weekly">Weekly</option>
-                <option value="monthly">Monthly</option>
-              </select>
-            </label>
-
-            <label style={{ display: 'grid', gap: 6, fontSize: 13, fontWeight: 700, color: '#334155' }}>
-              Base Date
-              <input
-                type="date"
-                value={selectedDate}
-                onChange={(event) => setSelectedDate(event.target.value)}
-                style={{ width: '100%', minWidth: 0, padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(148,163,184,0.35)' }}
-              />
-            </label>
-
-            <div style={{ display: 'flex', alignItems: 'end' }}>
-              <button type="button" className="btn btn-secondary" onClick={() => void loadRoster()} style={{ width: '100%' }}>
-                Refresh
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {errorMessage ? <div style={{ color: '#b91c1c', fontWeight: 700 }}>{errorMessage}</div> : null}
-        {successMessage ? <div style={{ color: '#047857', fontWeight: 700 }}>{successMessage}</div> : null}
+  const policyChanged = Boolean(rosterData && (
+    JSON.stringify(policyWorkingDays) !== JSON.stringify(rosterData.policy.workingDays) ||
+    policyExtraCashEnabled !== Boolean(rosterData.policy.extraCashEnabled ?? rosterData.policy.sundayBonusEnabled ?? true) ||
+    JSON.stringify(policyExtraCashDays) !== JSON.stringify(rosterData.policy.extraCashDays?.length ? [...rosterData.policy.extraCashDays].sort((a,b) => a-b) : [0]) ||
+    policyExtraCashAmount !== Number(rosterData.policy.extraCashAmount ?? rosterData.policy.sundayBonusAmount ?? 0)
+  ));
+  const hasPendingChanges = policyChanged || pendingOverrideChanges.length > 0 || pendingEmployeeExtraChanges.length > 0;
+  useEffect(() => {
+    const warn = (event: BeforeUnloadEvent) => { if (hasPendingChanges) { event.preventDefault(); event.returnValue = ''; } };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [hasPendingChanges]);
+  const visibleEmployees = rosterData?.employees.filter(employee => `${employee.employeeName} ${employee.employeeId} ${employee.designation || ''}`.toLowerCase().includes(search.toLowerCase())) || [];
+  const scopeLabel = stores.find(store => store.value === effectiveStoreId)?.label || (effectiveStoreId ? 'Assigned store' : 'All stores');
+  const changeScope = (change: () => void) => {
+    if (hasPendingChanges && !window.confirm('Discard your unsaved roster changes?')) return;
+    setSuccessMessage(''); change();
+  };
+  return <WorkforceWorkspace actions={<button className={styles.secondary} disabled={isLoading || isProcessingSave} onClick={() => changeScope(() => { void loadRoster(); })}>Refresh</button>}>
+    {errorMessage && <p className={styles.error} role="alert">{errorMessage}</p>}
+    {successMessage && <p className={styles.notice} role="status">{successMessage}</p>}
+    <section className={styles.panel}>
+      <div className={styles.panelHeader}><div><h2>Team roster</h2><p>Plan working days and additional daily pay for your team.</p></div>{rosterData && <span className={styles.badge}>{rosterData.employees.length} employees</span>}</div>
+      <div className={styles.filters}>
+        <label>Store<select value={effectiveStoreId || ''} disabled={isStoreLocked || isProcessingSave} onChange={e => changeScope(() => setSelectedStoreId(e.target.value))}><option value="">All stores</option>{stores.map(store => <option key={store.value} value={store.value}>{store.label}</option>)}</select></label>
+        <label>View<select value={selectedView} disabled={isProcessingSave} onChange={e => changeScope(() => setSelectedView(e.target.value as RosterViewMode))}><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select></label>
+        <label>Date<input type="date" required value={selectedDate} disabled={isProcessingSave} onChange={e => { if(e.target.value) changeScope(() => setSelectedDate(e.target.value)); }} /></label>
+        <input aria-label="Search roster employees" placeholder="Search employee name or ID" value={search} onChange={e => setSearch(e.target.value)} />
       </div>
-
-      <div className="card" style={{ display: 'grid', gap: 14 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-          <div>
-            <h3 style={{ margin: 0, fontSize: 18 }}>Default Roster Configuration</h3>
-            <p style={{ margin: '6px 0 0', color: '#64748b', fontSize: 13 }}>
-              By default employees are rostered on configured days (Mon-Fri initially). After changing settings, use Save Policy to apply updates.
-            </p>
-          </div>
-          <button type="button" className="btn btn-primary" onClick={() => setConfirmAction('policy')} disabled={!canManagePolicy || isSavingPolicy}>
-            {isSavingPolicy ? 'Saving...' : 'Save Policy'}
-          </button>
-        </div>
-
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 14 }}>
-          <section style={{ display: 'grid', gap: 8, padding: 12, borderRadius: 12, border: '1px solid rgba(148,163,184,0.2)', background: 'rgba(248,250,252,0.75)' }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: '#334155' }}>Roster Days</div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-              {weekdayNames.map((dayLabel, index) => (
-                <label key={dayLabel} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 74, justifyContent: 'center', padding: '8px 10px', borderRadius: 999, border: '1px solid rgba(148,163,184,0.35)', background: '#fff', fontSize: 13, fontWeight: 700, color: '#334155' }}>
-                  <input
-                    type="checkbox"
-                    checked={policyWorkingDays.includes(index)}
-                    onChange={() => toggleWorkingDay(index)}
-                    disabled={!canManagePolicy || isSavingPolicy}
-                  />
-                  {dayLabel}
-                </label>
-              ))}
-            </div>
+      {rosterData && <p className={styles.hint}>{scopeLabel} · {new Date(rosterData.period.startDate).toLocaleDateString()} – {new Date(rosterData.period.endDate).toLocaleDateString()}</p>}
+    </section>
+    <details className={workforce.settings}>
+      <summary>Working days &amp; extra pay<small>Configure defaults for {scopeLabel.toLowerCase()}. Open to view or change settings.</small></summary>
+      <form onSubmit={e => { e.preventDefault(); setConfirmAction('policy'); }}>
+        <fieldset className={workforce.fieldset} disabled={!canManagePolicy || isProcessingSave || isLoading || !rosterData}>
+          <section className={workforce.section}><h3>Default working days</h3><div className={workforce.days}>{weekdayNames.map((day,index) => <label key={day}><input type="checkbox" checked={policyWorkingDays.includes(index)} onChange={() => toggleWorkingDay(index)} />{day}</label>)}</div></section>
+          <section className={workforce.section}><label className={workforce.switch}><input type="checkbox" checked={policyExtraCashEnabled} onChange={e => setPolicyExtraCashEnabled(e.target.checked)} />Enable extra daily pay</label>
+            {policyExtraCashEnabled && <><p className={styles.hint}>Employees receive extra pay when working on the selected days.</p><div className={workforce.days}>{weekdayNames.map((day,index) => <label key={day}><input type="checkbox" checked={policyExtraCashDays.includes(index)} onChange={() => toggleExtraCashDay(index)} />{day}</label>)}</div><div className={styles.filters}><label>Default amount per day (₹)<input type="number" required min="0" step="0.01" value={policyExtraCashAmount} onChange={e => setPolicyExtraCashAmount(Number(e.target.value))} /></label></div></>}
           </section>
-
-          <section style={{ display: 'grid', gap: 10, padding: 12, borderRadius: 12, border: '1px solid rgba(148,163,184,0.2)', background: 'rgba(248,250,252,0.75)' }}>
-            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontWeight: 700, color: '#334155' }}>
-              <input
-                type="checkbox"
-                checked={policyExtraCashEnabled}
-                onChange={(event) => setPolicyExtraCashEnabled(event.target.checked)}
-                disabled={!canManagePolicy || isSavingPolicy}
-              />
-              Extra Cash Enabled
-            </label>
-
-            <div style={{ display: 'grid', gap: 8 }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: '#334155' }}>Extra Cash Days</div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                {weekdayNames.map((dayLabel, index) => (
-                  <label key={`extra-day-${dayLabel}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 74, justifyContent: 'center', padding: '8px 10px', borderRadius: 999, border: '1px solid rgba(148,163,184,0.35)', background: '#fff', fontSize: 13, fontWeight: 700, color: '#334155' }}>
-                    <input
-                      type="checkbox"
-                      checked={policyExtraCashDays.includes(index)}
-                      onChange={() => toggleExtraCashDay(index)}
-                      disabled={!canManagePolicy || isSavingPolicy || !policyExtraCashEnabled}
-                    />
-                    {dayLabel}
-                  </label>
-                ))}
-              </div>
-            </div>
-
-            <div style={{ display: 'flex', gap: 12, alignItems: 'end', flexWrap: 'wrap' }}>
-              <label style={{ display: 'grid', gap: 6, fontSize: 13, fontWeight: 700, color: '#334155' }}>
-                Default Extra Cash Amount
-                <input
-                  type="number"
-                  min={0}
-                  step="0.01"
-                  value={policyExtraCashAmount}
-                  onChange={(event) => setPolicyExtraCashAmount(Number(event.target.value))}
-                  disabled={!canManagePolicy || isSavingPolicy || !policyExtraCashEnabled}
-                  style={{ width: 190, padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(148,163,184,0.35)' }}
-                />
-              </label>
-
-              <div style={{ fontSize: 13, color: '#64748b', paddingBottom: 8 }}>
-                Active rate: <strong>{asCurrency(policyExtraCashEnabled ? policyExtraCashAmount : 0)}</strong>
-              </div>
-            </div>
-          </section>
-        </div>
-      </div>
-
-      <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-        {isLoading ? (
-          <div style={{ padding: 22, color: '#64748b', fontWeight: 600 }}>Loading roster...</div>
-        ) : !rosterData ? (
-          <div style={{ padding: 22, color: '#64748b', fontWeight: 600 }}>No roster data found.</div>
-        ) : (
-          <div style={{ overflowX: 'auto' }}>
-            <div style={{ padding: '12px 16px', borderBottom: '1px solid rgba(148,163,184,0.2)', display: 'grid', gap: 10 }}>
-              <div style={{ display: 'flex', gap: 16, alignItems: 'center', color: '#334155', fontSize: 12, fontWeight: 700, flexWrap: 'wrap' }}>
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ width: 12, height: 12, borderRadius: 4, background: 'rgba(226,232,240,0.8)', border: '1px solid rgba(148,163,184,0.35)' }} />
-                  Weekday
-                </span>
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ width: 12, height: 12, borderRadius: 4, background: 'rgba(254,226,226,0.55)', border: '1px solid rgba(248,113,113,0.35)' }} />
-                  Weekend
-                </span>
-                <span style={{ color: '#64748b' }}>Overrides: {pendingOverrideChanges.length}</span>
-                <span style={{ color: '#64748b' }}>Employee extras: {pendingEmployeeExtraChanges.length}</span>
-              </div>
-
-              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={() => setConfirmAction('employee-extras')}
-                  disabled={!canManagePolicy || isSavingEmployeeExtras || pendingEmployeeExtraChanges.length === 0}
-                >
-                  {isSavingEmployeeExtras ? 'Saving...' : 'Save Employee Amounts'}
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  onClick={() => setConfirmAction('overrides')}
-                  disabled={!canManagePolicy || isSavingOverrides || pendingOverrideChanges.length === 0}
-                >
-                  {isSavingOverrides ? 'Saving...' : 'Save Overrides'}
-                </button>
-              </div>
-            </div>
-            <table className="table" style={{ minWidth: 1260 }}>
-              <thead>
-                <tr>
-                  <th>Employee</th>
-                  <th>Designation</th>
-                  <th>Extra Cash / Day</th>
-                  <th>Total Working Days</th>
-                  <th>Total Extra Cash</th>
-                  {rosterData.dates.map((day) => (
-                    <th
-                      key={day.date}
-                      style={{
-                        background: day.dayOfWeek === 0 || day.dayOfWeek === 6 ? 'rgba(254,226,226,0.55)' : 'rgba(226,232,240,0.8)',
-                        color: day.dayOfWeek === 0 || day.dayOfWeek === 6 ? '#b91c1c' : '#334155',
-                      }}
-                    >
-                      {day.label}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {rosterData.employees.length > 0 ? (
-                  rosterData.employees.map((employee) => (
-                    <tr key={employee.employeeId}>
-                      <td>{employee.employeeName}</td>
-                      <td>
-                        <span
-                          className={`badge ${getDesignationBadgeClass(employee.designation || '')}`}
-                          style={{ display: 'inline-block', padding: '6px 10px', borderRadius: 999, fontSize: 11, fontWeight: 700 }}
-                        >
-                          {employee.designation || 'Unassigned'}
-                        </span>
-                      </td>
-                      <td>
-                        <input
-                          type="number"
-                          min={0}
-                          step="0.01"
-                          value={Number(draftEmployeeExtras[employee.employeeId] ?? employee.extraCashAmount ?? 0)}
-                          onChange={(event) => setEmployeeExtraAmount(employee.employeeId, Number(event.target.value))}
-                          disabled={!canManagePolicy || isSavingEmployeeExtras || !policyExtraCashEnabled}
-                          style={{ width: 110, padding: '6px 8px', borderRadius: 8, border: `1px solid ${Number((draftEmployeeExtras[employee.employeeId] ?? 0).toFixed(2)) !== Number((initialEmployeeExtras[employee.employeeId] ?? 0).toFixed(2)) ? 'rgba(29,78,216,0.45)' : 'rgba(148,163,184,0.35)'}` }}
-                        />
-                      </td>
-                      <td>{employee.totalWorkingDays}</td>
-                      <td>{asCurrency(Number(employee.totalExtraCash ?? employee.totalSundayExtra ?? 0))}</td>
-                      {employee.days.map((day) => {
-                        const key = buildOverrideKey(employee.employeeId, day.date);
-                        const draftValue = draftOverrides[key] ?? day.isWorkingDay;
-                        const initialValue = initialOverrides[key] ?? day.isWorkingDay;
-                        const hasPendingChange = draftValue !== initialValue;
-                        const isWeekend = day.dayOfWeek === 0 || day.dayOfWeek === 6;
-                        const employeeDayRate = Number(draftEmployeeExtras[employee.employeeId] ?? employee.extraCashAmount ?? policyExtraCashAmount ?? 0);
-                        const dayExtraAmount = Boolean(day.isExtraCashDay) && draftValue && policyExtraCashEnabled ? employeeDayRate : 0;
-
-                        return (
-                        <td
-                          key={`${employee.employeeId}-${day.date}`}
-                          style={{
-                            background: isWeekend ? 'rgba(254,226,226,0.3)' : 'rgba(226,232,240,0.35)',
-                          }}
-                        >
-                          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                            <input
-                              type="checkbox"
-                              checked={draftValue}
-                              onChange={(event) => {
-                                applyDraftOverride(employee.employeeId, day.date, event.target.checked);
-                              }}
-                              disabled={!canManagePolicy || isSavingOverrides}
-                            />
-                            <span style={{ fontSize: 11, color: hasPendingChange ? '#1d4ed8' : day.isOverride ? '#b45309' : '#64748b', fontWeight: hasPendingChange || day.isOverride ? 700 : 500 }}>
-                              {hasPendingChange ? 'Pending' : day.isOverride ? 'Override' : 'Default'}
-                            </span>
-                          </label>
-                          {dayExtraAmount > 0 ? (
-                            <div style={{ fontSize: 11, color: '#047857', fontWeight: 700, marginTop: 4 }}>
-                              +{asCurrency(dayExtraAmount)}
-                            </div>
-                          ) : null}
-                        </td>
-                        );
-                      })}
-                    </tr>
-                  ))
-                ) : (
-                  <tr>
-                    <td colSpan={5 + rosterData.dates.length} style={{ textAlign: 'center', padding: '24px 14px', color: '#64748b', fontWeight: 600 }}>
-                      No active employees found for selected store/scope.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      {confirmAction ? (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(15,23,42,0.45)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 1000,
-            padding: 16,
-          }}
-          role="dialog"
-          aria-modal="true"
-        >
-          <div className="card" style={{ width: '100%', maxWidth: 460, display: 'grid', gap: 12 }}>
-            <h3 style={{ margin: 0, fontSize: 18 }}>Confirm changes</h3>
-            <p style={{ margin: 0, color: '#475569', fontSize: 14 }}>
-              {confirmAction === 'policy'
-                ? 'Do you want to save this default roster policy for the selected scope?'
-                : confirmAction === 'overrides'
-                  ? `Do you want to save ${pendingOverrideChanges.length} override change${pendingOverrideChanges.length === 1 ? '' : 's'}?`
-                  : `Do you want to save ${pendingEmployeeExtraChanges.length} employee extra amount change${pendingEmployeeExtraChanges.length === 1 ? '' : 's'}?`}
-            </p>
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={() => setConfirmAction(null)}
-                disabled={isProcessingSave}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="btn btn-primary"
-                disabled={isProcessingSave}
-                onClick={() => {
-                  const action = confirmAction;
-                  setConfirmAction(null);
-
-                  if (action === 'policy') {
-                    void savePolicy();
-                    return;
-                  }
-
-                  if (action === 'employee-extras') {
-                    void saveEmployeeExtras();
-                    return;
-                  }
-
-                  void saveOverrides();
-                }}
-              >
-                {isProcessingSave ? 'Saving...' : 'Confirm Save'}
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-    </main>
-  );
+          <div className={styles.actions}><button type="submit" className={styles.primary}>{isSavingPolicy ? 'Saving…' : 'Save settings'}</button><p className={styles.hint}>{effectiveStoreId ? 'Applies to this store.' : 'Applies to stores without their own policy.'}</p></div>
+        </fieldset>
+      </form>
+    </details>
+    <section className={styles.panel}>
+      <div className={styles.panelHeader}><div><h2>Employee schedule</h2><p>Check a day to mark it as working. Blue labels indicate unsaved changes. Totals reflect the last saved schedule.</p></div><div className={styles.actions}><button className={styles.secondary} onClick={() => setConfirmAction('employee-extras')} disabled={!canManagePolicy || isProcessingSave || !pendingEmployeeExtraChanges.length}>Save pay changes{pendingEmployeeExtraChanges.length ? ` (${pendingEmployeeExtraChanges.length})` : ''}</button><button className={styles.primary} onClick={() => setConfirmAction('overrides')} disabled={!canManagePolicy || isProcessingSave || !pendingOverrideChanges.length}>Save working days{pendingOverrideChanges.length ? ` (${pendingOverrideChanges.length})` : ''}</button></div></div>
+      {isLoading ? <p className={styles.empty} role="status">Loading roster…</p> : !rosterData ? <p className={styles.empty}>Roster could not be loaded. Use Refresh to try again.</p> : <div className={styles.tableWrap}><table className={`${styles.table} ${workforce.roster}`}><thead><tr><th>Employee</th><th>Extra pay / day (₹)</th><th>Working days</th><th>Total extra pay</th>{rosterData.dates.map(day => <th key={day.date} className={day.dayOfWeek === 0 || day.dayOfWeek === 6 ? workforce.weekend : undefined}>{day.label}</th>)}</tr></thead><tbody>
+        {visibleEmployees.map(employee => <tr key={employee.employeeId}><td><strong>{employee.employeeName}</strong><small>{employee.employeeId} · {employee.designation || 'No designation'}</small></td><td><input aria-label={`Extra daily pay for ${employee.employeeName}`} type="number" min="0" step="0.01" style={{width:110}} value={draftEmployeeExtras[employee.employeeId] ?? employee.extraCashAmount ?? 0} onChange={e => setEmployeeExtraAmount(employee.employeeId, Number(e.target.value))} disabled={!canManagePolicy || isProcessingSave || !policyExtraCashEnabled} /></td><td>{employee.totalWorkingDays}</td><td>{asCurrency(Number(employee.totalExtraCash ?? employee.totalSundayExtra ?? 0))}</td>{employee.days.map(day => {
+          const key = buildOverrideKey(employee.employeeId, day.date);
+          const checked = draftOverrides[key] ?? day.isWorkingDay;
+          const changed = checked !== (initialOverrides[key] ?? day.isWorkingDay);
+          const rate = Number(draftEmployeeExtras[employee.employeeId] ?? employee.extraCashAmount ?? policyExtraCashAmount ?? 0);
+          return <td key={day.date} className={day.dayOfWeek === 0 || day.dayOfWeek === 6 ? workforce.weekend : undefined}><label className={workforce.day} data-changed={changed}><input aria-label={`${employee.employeeName}, ${day.date}, working day`} type="checkbox" checked={checked} onChange={e => applyDraftOverride(employee.employeeId,day.date,e.target.checked)} disabled={!canManagePolicy || isProcessingSave} /><span>{changed ? 'Unsaved' : checked ? 'Working' : 'Day off'}</span>{day.isExtraCashDay && checked && policyExtraCashEnabled && rate > 0 && <small>+{asCurrency(rate)}</small>}</label></td>;
+        })}</tr>)}
+        {!visibleEmployees.length && <tr><td colSpan={4 + rosterData.dates.length} className={styles.empty}>No employees match this store or search.</td></tr>}
+      </tbody></table></div>}
+    </section>
+    {confirmAction && <AdminDialog title="Save roster changes" busy={isProcessingSave} onClose={() => setConfirmAction(null)}>
+      <header className={styles.dialogHeader}><h2>Save roster changes</h2><button className={styles.secondary} aria-label="Close dialog" disabled={isProcessingSave} onClick={() => setConfirmAction(null)}>×</button></header>
+      <div className={styles.dialogBody}><p>{confirmAction === 'policy' ? `Update working days and extra pay settings for ${scopeLabel}?` : confirmAction === 'overrides' ? `Save ${pendingOverrideChanges.length} working-day changes for ${scopeLabel}?` : `Save extra daily pay for ${pendingEmployeeExtraChanges.length} employees?`}</p><p className={styles.hint}>These settings are used by attendance and payroll.</p></div>
+      <footer className={styles.dialogFooter}><button className={styles.secondary} disabled={isProcessingSave} onClick={() => setConfirmAction(null)}>Cancel</button><button className={styles.primary} disabled={isProcessingSave} onClick={async () => { const action = confirmAction; await (action === 'policy' ? savePolicy() : action === 'overrides' ? saveOverrides() : saveEmployeeExtras()); setConfirmAction(null); }}>{isProcessingSave ? 'Saving…' : 'Save changes'}</button></footer>
+    </AdminDialog>}
+  </WorkforceWorkspace>;
 }

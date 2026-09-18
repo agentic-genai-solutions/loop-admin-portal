@@ -1,5 +1,5 @@
 import FinanceWorkspace from '@/components/finance/FinanceWorkspace';
 
 export default function FinancePage() {
-  return <FinanceWorkspace />;
+  return <FinanceWorkspace tab="Salaries" />;
 }

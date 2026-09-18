@@ -1,7 +1,9 @@
 'use client';
 
+import AdminWorkspace from '@/components/admin/AdminWorkspace';
+import adminStyles from '@/components/admin/admin.module.css';
+
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { FeedbackToast } from '@/components/Feedback';
 import { EmptyState, TableSkeleton } from '@/components/Loaders';
 import { fetchDirectors } from '@/lib/admin-data';
 import { isDirectorRole, isSuperAdminRole } from '@/lib/utils';
@@ -12,14 +14,12 @@ const initialDirectors: Director[] = [];
 
 export default function DirectorsPage() {
   const [directors, setDirectors] = useState(initialDirectors);
-  const [isApiLoaded, setIsApiLoaded] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
   const [sortBy, setSortBy] = useState<'name' | 'email' | 'region' | 'stores' | 'status'>('name');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
-  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
   const visibleDirectors = useMemo(() => {
     const filtered = directors.filter((director) => {
@@ -69,24 +69,18 @@ export default function DirectorsPage() {
     return sortDirection === 'asc' ? '↑' : '↓';
   };
 
-  const showToast = useCallback((message: string, type: 'success' | 'error' = 'success') => {
-    setToast({ message, type });
-  }, []);
-
   const loadDirectors = useCallback(async () => {
     setIsLoading(true);
     setHasError(false);
     try {
       const mappedDirectors = await fetchDirectors();
       setDirectors(mappedDirectors);
-      setIsApiLoaded(true);
     } catch {
       setHasError(true);
-      showToast('Failed to load directors after 3 attempts. Please try again.', 'error');
     } finally {
       setIsLoading(false);
     }
-  }, [showToast]);
+  }, []);
 
   useEffect(() => {
     const storedUser = window.sessionStorage.getItem('loop_admin_user');
@@ -110,105 +104,11 @@ export default function DirectorsPage() {
     loadDirectors();
   }, [loadDirectors]);
 
-  return (
-    <main className="portal-page">
-      {toast && (
-        <FeedbackToast
-          title={toast.type === 'success' ? 'Success' : 'Error'}
-          description={toast.message}
-          type={toast.type}
-          onClose={() => setToast(null)}
-          durationMs={2800}
-        />
-      )}
-
-      <div className="card" style={{ padding: 18, borderRadius: 18, border: '1px solid rgba(148,163,184,0.18)', boxShadow: '0 12px 28px rgba(15,23,42,0.04)' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 16 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 180px), 1fr))', gap: 16, alignItems: 'end', width: '100%', maxWidth: 520 }}>
-            <label style={{ display: 'grid', gap: 8, fontWeight: 700, color: '#334155', fontSize: 13 }}>
-              Search
-              <input
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="Search name, email or region"
-                style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(148,163,184,0.35)', background: 'rgba(255,255,255,0.42)' }}
-              />
-            </label>
-
-            <label style={{ display: 'grid', gap: 8, fontWeight: 700, color: '#334155', fontSize: 13 }}>
-              Status
-              <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(148,163,184,0.35)', background: 'rgba(255,255,255,0.42)' }}>
-                <option value="All">All Statuses</option>
-                <option value="Active">Active</option>
-                <option value="Pending">Pending</option>
-                <option value="Inactive">Inactive</option>
-              </select>
-            </label>
-          </div>
-
-        </div>
-
-        <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
-          {isLoading ? (
-            <TableSkeleton columns={6} rows={4} />
-          ) : hasError ? (
-            <EmptyState variant="error" onRetry={loadDirectors} />
-          ) : (
-            <table className="table" style={{ minWidth: 760 }}>
-              <thead>
-                <tr>
-                  <th>
-                    <button type="button" onClick={() => handleSort('name')} style={{ border: 'none', background: 'transparent', color: 'inherit', fontWeight: 800, cursor: 'pointer', padding: 0 }}>
-                      Name {getSortArrow('name')}
-                    </button>
-                  </th>
-                  <th>
-                    <button type="button" onClick={() => handleSort('email')} style={{ border: 'none', background: 'transparent', color: 'inherit', fontWeight: 800, cursor: 'pointer', padding: 0 }}>
-                      Email {getSortArrow('email')}
-                    </button>
-                  </th>
-                  <th>
-                    <button type="button" onClick={() => handleSort('region')} style={{ border: 'none', background: 'transparent', color: 'inherit', fontWeight: 800, cursor: 'pointer', padding: 0 }}>
-                      Region {getSortArrow('region')}
-                    </button>
-                  </th>
-                  <th>
-                    <button type="button" onClick={() => handleSort('stores')} style={{ border: 'none', background: 'transparent', color: 'inherit', fontWeight: 800, cursor: 'pointer', padding: 0 }}>
-                      Stores Assigned {getSortArrow('stores')}
-                    </button>
-                  </th>
-                  <th>
-                    <button type="button" onClick={() => handleSort('status')} style={{ border: 'none', background: 'transparent', color: 'inherit', fontWeight: 800, cursor: 'pointer', padding: 0 }}>
-                      Status {getSortArrow('status')}
-                    </button>
-                  </th>
-                  <th>Access</th>
-                </tr>
-              </thead>
-              <tbody>
-                {visibleDirectors.length > 0 ? (
-                  visibleDirectors.map((director) => (
-                    <tr key={director.id}>
-                      <td>{director.name}</td>
-                      <td>{director.email}</td>
-                      <td>{director.region}</td>
-                      <td>{director.stores}</td>
-                      <td>
-                        <span className={`badge ${director.status === 'Active' ? 'success' : director.status === 'Pending' ? 'warning' : 'danger'}`}>
-                          {director.status}
-                        </span>
-                      </td>
-                      <td>Read only</td>
-                    </tr>
-                  ))
-                ) : (
-                  <EmptyState colSpan={6} title="No directors found" description="No directors match the current search or filters." />
-                )}
-              </tbody>
-            </table>
-          )}
-        </div>
-      </div>
-    </main>
-  );
+  return <AdminWorkspace actions={<button className={adminStyles.secondary} disabled={isLoading} onClick={loadDirectors}>Refresh</button>}>
+    <section className={adminStyles.panel}>
+      <div className={adminStyles.panelHeader}><div><h2>Director directory</h2><p>View director contact details and assigned stores.</p></div></div>
+      <div className={adminStyles.filters}><input aria-label="Search directors" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search name, email or store…" /><select aria-label="Director status" value={statusFilter} onChange={event => setStatusFilter(event.target.value)}><option value="All">All statuses</option><option>Active</option><option>Inactive</option></select></div>
+      {isLoading ? <TableSkeleton columns={4} rows={4} /> : hasError ? <EmptyState variant="error" onRetry={loadDirectors} /> : <><p className={adminStyles.count}>{visibleDirectors.length} directors · {summaryStats.active} active</p><div className={adminStyles.tableWrap}><table className={adminStyles.table}><thead><tr>{([['name', 'Director'], ['email', 'Email'], ['region', 'Assigned store'], ['status', 'Status']] as const).map(([key, label]) => <th key={key} aria-sort={sortBy === key ? sortDirection === 'asc' ? 'ascending' : 'descending' : 'none'}><button className={adminStyles.link} onClick={() => handleSort(key)}>{label} {getSortArrow(key)}</button></th>)}</tr></thead><tbody>{visibleDirectors.map(director => <tr key={director.id}><td><strong>{director.name}</strong></td><td>{director.email || '—'}</td><td>{director.region}</td><td><span className={adminStyles.badge} data-status={director.status}>{director.status}</span></td></tr>)}{!visibleDirectors.length && <tr><td colSpan={4} className={adminStyles.empty}>No directors match your filters.</td></tr>}</tbody></table></div></>}
+    </section>
+  </AdminWorkspace>;
 }

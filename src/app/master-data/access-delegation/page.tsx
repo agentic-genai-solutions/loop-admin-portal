@@ -1,7 +1,10 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { apiFetchWithRetry } from '@/lib/api';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import MasterDataWorkspace from '@/components/master-data/MasterDataWorkspace';
+import admin from '@/components/admin/admin.module.css';
+import master from '@/components/master-data/master-data.module.css';
+import { apiFetch, apiFetchWithRetry } from '@/lib/api';
 
 type RoleOption = {
   _id?: string;
@@ -82,18 +85,6 @@ const profileFieldOptions = [
   { id: 'field-profile-image', label: 'Profile image' },
 ];
 
-const fallbackRoles: RoleOption[] = [
-  { roleCode: 'super_admin', label: 'System Administrator' },
-  { roleCode: 'director', label: 'Director' },
-  { roleCode: 'hr_manager', label: 'HR Manager' },
-  { roleCode: 'store_admin', label: 'Store Admin' },
-  { roleCode: 'store_manager', label: 'Store Manager' },
-  { roleCode: 'operations_manager', label: 'Operations Manager' },
-  { roleCode: 'warehouse_manager', label: 'Warehouse Manager' },
-  { roleCode: 'finance_manager', label: 'Finance Manager' },
-  { roleCode: 'staff_member', label: 'Staff Member' },
-];
-
 const defaultRule = (roleCode: string, label: string): AccessRule => ({
   roleCode,
   canLoginToAdminPortal: roleCode === 'super_admin' || roleCode === 'director',
@@ -109,357 +100,81 @@ const buildRuleFromRole = (role: RoleOption): AccessRule => ({
   roleCode: role.roleCode,
   canLoginToAdminPortal: Boolean(role.canLoginToAdminPortal ?? (role.roleCode === 'super_admin' || role.roleCode === 'director')),
   canViewDeletedUserRecords: Boolean(role.canViewDeletedUserRecords ?? (role.roleCode === 'super_admin' || role.roleCode === 'super_admin_it')),
-  sidebarMenuIds: Array.isArray(role.sidebarMenuIds) && role.sidebarMenuIds.length > 0 ? role.sidebarMenuIds : defaultRule(role.roleCode, role.label).sidebarMenuIds,
-  pageAccessIds: Array.isArray(role.pageAccessIds) && role.pageAccessIds.length > 0 ? role.pageAccessIds : defaultRule(role.roleCode, role.label).pageAccessIds,
-  featureAccessIds: Array.isArray(role.featureAccessIds) && role.featureAccessIds.length > 0 ? role.featureAccessIds : defaultRule(role.roleCode, role.label).featureAccessIds,
-  profileFieldIds: Array.isArray(role.profileFieldIds) && role.profileFieldIds.length > 0 ? role.profileFieldIds : defaultRule(role.roleCode, role.label).profileFieldIds,
+  sidebarMenuIds: Array.isArray(role.sidebarMenuIds) ? role.sidebarMenuIds : defaultRule(role.roleCode, role.label).sidebarMenuIds,
+  pageAccessIds: Array.isArray(role.pageAccessIds) ? role.pageAccessIds : defaultRule(role.roleCode, role.label).pageAccessIds,
+  featureAccessIds: Array.isArray(role.featureAccessIds) ? role.featureAccessIds : defaultRule(role.roleCode, role.label).featureAccessIds,
+  profileFieldIds: Array.isArray(role.profileFieldIds) ? role.profileFieldIds : defaultRule(role.roleCode, role.label).profileFieldIds,
 });
 
+type SectionKey = 'sidebarMenuIds' | 'pageAccessIds' | 'featureAccessIds' | 'profileFieldIds';
+const sections: { key: SectionKey; title: string; hint: string; options: { id: string; label: string }[] }[] = [
+  { key: 'sidebarMenuIds', title: 'Navigation menus', hint: 'Menus visible in the sidebar.', options: sidebarMenuOptions },
+  { key: 'pageAccessIds', title: 'Page access', hint: 'Pages available to this role.', options: pageAccessOptions },
+  { key: 'featureAccessIds', title: 'Features & actions', hint: 'Actions employees with this role can use.', options: featureOptions },
+  { key: 'profileFieldIds', title: 'Profile information', hint: 'Information visible in employee profiles.', options: profileFieldOptions },
+];
 export default function AccessDelegationPage() {
-  const [roles, setRoles] = useState<RoleOption[]>(fallbackRoles);
-  const [selectedRole, setSelectedRole] = useState('super_admin');
+  const saveLock = useRef(false);
+  const [roles, setRoles] = useState<RoleOption[]>([]);
+  const [selectedRole, setSelectedRole] = useState('');
   const [rules, setRules] = useState<Record<string, AccessRule>>({});
+  const [savedRules, setSavedRules] = useState<Record<string, AccessRule>>({});
   const [loading, setLoading] = useState(true);
-  const [saveStatus, setSaveStatus] = useState<'idle' | 'saved'>('idle');
-
-  useEffect(() => {
-    const loadRoles = async () => {
-      try {
-        const fetched = await apiFetchWithRetry<RoleOption[]>('/master-data/roles').catch(() => []);
-        const normalized = Array.isArray(fetched) && fetched.length > 0 ? fetched : fallbackRoles;
-
-        const mergedRoles = normalized
-          .filter((role) => role && (role.includeInRoleAccessMatrix ?? true))
-          .map((role) => ({
-            _id: role._id,
-            roleCode: role.roleCode,
-            label: role.label,
-            canLoginToAdminPortal: role.canLoginToAdminPortal,
-            canViewDeletedUserRecords: role.canViewDeletedUserRecords,
-            sidebarMenuIds: role.sidebarMenuIds,
-            pageAccessIds: role.pageAccessIds,
-            featureAccessIds: role.featureAccessIds,
-            profileFieldIds: role.profileFieldIds,
-          }));
-
-        setRoles(mergedRoles);
-
-        const nextRules = Object.fromEntries(
-          mergedRoles.map((role) => [role.roleCode, buildRuleFromRole(role)]),
-        );
-
-        setRules(nextRules);
-      } catch {
-        setRoles(fallbackRoles);
-        setRules(Object.fromEntries(fallbackRoles.map((role) => [role.roleCode, defaultRule(role.roleCode, role.label)])));
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    void loadRoles();
-  }, []);
-
-  const activeRule = useMemo(() => {
-    return rules[selectedRole] ?? defaultRule(selectedRole, selectedRole.replace(/_/g, ' '));
-  }, [rules, selectedRole]);
-
-  const activeRole = useMemo(() => roles.find((role) => role.roleCode === selectedRole), [roles, selectedRole]);
-
-  const updateRule = (patch: Partial<AccessRule>) => {
-    setSaveStatus('idle');
-    setRules((current) => ({
-      ...current,
-      [selectedRole]: {
-        ...defaultRule(selectedRole, selectedRole.replace(/_/g, ' ')),
-        ...current[selectedRole],
-        ...patch,
-      },
-    }));
-  };
-
-  const handleSave = async () => {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [search, setSearch] = useState('');
+  const loadRoles = useCallback(async () => {
+    setLoading(true); setError(''); setNotice('');
     try {
-      if (!activeRole?._id) {
-        throw new Error('Selected role is missing a role id');
-      }
-
+      const fetched = await apiFetchWithRetry<RoleOption[]>('/master-data/roles');
+      const rows = fetched.filter(role => role._id && (role.includeInRoleAccessMatrix ?? true)).sort((a,b) => a.label.localeCompare(b.label));
+      const next = Object.fromEntries(rows.map(role => [role.roleCode, buildRuleFromRole(role)]));
+      setRoles(rows); setRules(next); setSavedRules(next);
+      setSelectedRole(current => rows.some(role => role.roleCode === current) ? current : rows[0]?.roleCode || '');
+    } catch { setError('Unable to load access rules. Use Refresh to try again.'); setRoles([]); }
+    finally { setLoading(false); }
+  }, []);
+  useEffect(() => { void loadRoles(); }, [loadRoles]);
+  const activeRole = roles.find(role => role.roleCode === selectedRole);
+  const activeRule = rules[selectedRole];
+  const changed = Boolean(activeRule && JSON.stringify(activeRule) !== JSON.stringify(savedRules[selectedRole]));
+  const anyChanges = useMemo(() => Object.keys(rules).some(key => JSON.stringify(rules[key]) !== JSON.stringify(savedRules[key])), [rules,savedRules]);
+  useEffect(() => {
+    const warn = (event: BeforeUnloadEvent) => { if (anyChanges) { event.preventDefault(); event.returnValue = ''; } };
+    window.addEventListener('beforeunload', warn); return () => window.removeEventListener('beforeunload', warn);
+  }, [anyChanges]);
+  const updateRule = (patch: Partial<AccessRule>) => { setNotice(''); setRules(current => ({...current, [selectedRole]: {...current[selectedRole], ...patch}})); };
+  const handleSave = async () => {
+    if (saveLock.current || !activeRole?._id || !activeRule) return;
+    saveLock.current = true; setSaving(true); setError(''); setNotice('');
+    try {
       const payload = {
         includeInRoleAccessMatrix: true,
-        canLoginToAdminPortal: Boolean(activeRule.canLoginToAdminPortal),
-        canViewDeletedUserRecords: Boolean(activeRule.canViewDeletedUserRecords),
-        sidebarMenuIds: activeRule.sidebarMenuIds ?? [],
-        pageAccessIds: activeRule.pageAccessIds ?? [],
-        featureAccessIds: activeRule.featureAccessIds ?? [],
-        profileFieldIds: activeRule.profileFieldIds ?? [],
+        canLoginToAdminPortal: activeRule.canLoginToAdminPortal,
+        canViewDeletedUserRecords: activeRule.canViewDeletedUserRecords,
+        sidebarMenuIds: activeRule.sidebarMenuIds,
+        pageAccessIds: activeRule.pageAccessIds,
+        featureAccessIds: activeRule.featureAccessIds,
+        profileFieldIds: activeRule.profileFieldIds,
       };
-
-      await apiFetchWithRetry(`/master-data/access-delegation/${activeRole._id}`, {
-        method: 'PUT',
-        body: JSON.stringify(payload),
-      });
-
-      setRules((current) => ({
-        ...current,
-        [selectedRole]: {
-          ...(current[selectedRole] ?? activeRule),
-          ...payload,
-          roleId: activeRole._id,
-          roleCode: selectedRole,
-        },
-      }));
-      setSaveStatus('saved');
-    } catch {
-      setSaveStatus('idle');
-    }
+      await apiFetch(`/master-data/access-delegation/${activeRole._id}`, { method:'PUT', body:JSON.stringify(payload) });
+      setSavedRules(current => ({...current,[selectedRole]: {...activeRule}}));
+      setNotice(`Access rules saved for ${activeRole.label}.`);
+    } catch { setError('Unable to save access rules. Your changes are kept; please try again.'); }
+    finally { saveLock.current = false; setSaving(false); }
   };
-
-  const toggleListValue = (key: 'sidebarMenuIds' | 'pageAccessIds' | 'featureAccessIds' | 'profileFieldIds', value: string) => {
-    const current = activeRule[key] ?? [];
-    const next = current.includes(value)
-      ? current.filter((entry) => entry !== value)
-      : [...current, value];
-
-    updateRule({ [key]: next } as Partial<AccessRule>);
-  };
-
-  const selectAllForSection = (key: 'sidebarMenuIds' | 'pageAccessIds' | 'featureAccessIds' | 'profileFieldIds', options: { id: string }[]) => {
-    updateRule({ [key]: options.map((option) => option.id) } as Partial<AccessRule>);
-  };
-
-  const clearAllForSection = (key: 'sidebarMenuIds' | 'pageAccessIds' | 'featureAccessIds' | 'profileFieldIds') => {
-    updateRule({ [key]: [] } as Partial<AccessRule>);
-  };
-
-  const sectionCardStyle = {
-    background: 'linear-gradient(180deg, rgba(255,255,255,0.98), rgba(248,250,252,0.96))',
-    border: '1px solid rgba(148, 163, 184, 0.22)',
-    borderRadius: 18,
-    padding: 20,
-    boxShadow: '0 12px 28px rgba(15, 23, 42, 0.04)',
-  } as const;
-
-  const secondaryActionStyle = {
-    background: '#f8fafc',
-    color: '#0f172a',
-    border: '1px solid rgba(148, 163, 184, 0.25)',
-    borderRadius: 10,
-    padding: '8px 12px',
-    fontWeight: 700,
-    cursor: 'pointer',
-    transition: 'all 0.2s ease',
-  } as const;
-
-  const toggleRowStyle = {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 14,
-    padding: '10px 12px',
-    borderRadius: 12,
-    border: '1px solid rgba(148, 163, 184, 0.18)',
-    background: 'rgba(248, 250, 252, 0.7)',
-  } as const;
-
-  return (
-    <main className="portal-page">
-      <div style={{ display: 'grid', gap: 20 }}>
-        <div style={{ ...sectionCardStyle, display: 'grid', gap: 18 }}>
-          <div>
-            <p style={{ margin: 0, color: '#475569', fontSize: 14, letterSpacing: '-0.01em' }}>
-              Choose a role to configure login access, navigation visibility, feature access, and profile fields.
-            </p>
-          </div>
-
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
-            {roles.map((role) => (
-              <button
-                key={role.roleCode}
-                type="button"
-                onClick={() => setSelectedRole(role.roleCode)}
-                style={{
-                  padding: '12px 18px',
-                  borderRadius: 12,
-                  border: selectedRole === role.roleCode ? '1px solid rgba(15, 23, 42, 0.6)' : '1px solid rgba(148, 163, 184, 0.22)',
-                  background: selectedRole === role.roleCode ? 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)' : '#f8fafc',
-                  color: selectedRole === role.roleCode ? '#fff' : '#0f172a',
-                  fontWeight: 700,
-                  fontSize: 15,
-                  cursor: 'pointer',
-                  boxShadow: selectedRole === role.roleCode ? '0 10px 22px rgba(15, 23, 42, 0.16)' : 'none',
-                }}
-              >
-                {role.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div style={{ display: 'grid', gap: 18, gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 360px), 1fr))' }}>
-          <div style={sectionCardStyle}>
-            <div style={{ display: 'grid', gap: 14 }}>
-              <div style={toggleRowStyle}>
-                <span style={{ fontWeight: 700, color: '#0f172a' }}>Allow login to admin portal</span>
-                <input
-                  type="checkbox"
-                  checked={Boolean(activeRule.canLoginToAdminPortal)}
-                  onChange={(event) => updateRule({ canLoginToAdminPortal: event.target.checked })}
-                  style={{ width: 18, height: 18, accentColor: '#3b82f6' }}
-                />
-              </div>
-
-              <div style={toggleRowStyle}>
-                <span style={{ fontWeight: 700, color: '#0f172a' }}>Can view soft deleted user records</span>
-                <input
-                  type="checkbox"
-                  checked={Boolean(activeRule.canViewDeletedUserRecords)}
-                  onChange={(event) => updateRule({ canViewDeletedUserRecords: event.target.checked })}
-                  style={{ width: 18, height: 18, accentColor: '#3b82f6' }}
-                />
-              </div>
-            </div>
-          </div>
-
-          <div style={sectionCardStyle}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <button type="button" onClick={() => selectAllForSection('sidebarMenuIds', sidebarMenuOptions)} style={secondaryActionStyle}>Select all</button>
-                <button type="button" onClick={() => clearAllForSection('sidebarMenuIds')} style={{ ...secondaryActionStyle, background: '#fff' }}>Clear</button>
-              </div>
-            </div>
-            <div style={{ display: 'grid', gap: 8 }}>
-              {sidebarMenuOptions.map((item) => (
-                <label key={item.id} style={{ ...toggleRowStyle, padding: '9px 12px' }}>
-                  <span style={{ color: '#0f172a', fontWeight: 600 }}>{item.label}</span>
-                  <input
-                    type="checkbox"
-                    checked={(activeRule.sidebarMenuIds ?? []).includes(item.id)}
-                    onChange={() => toggleListValue('sidebarMenuIds', item.id)}
-                    style={{ width: 18, height: 18, accentColor: '#3b82f6' }}
-                  />
-                </label>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        <div style={{ display: 'grid', gap: 18, gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 360px), 1fr))' }}>
-          <div style={sectionCardStyle}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <button type="button" onClick={() => selectAllForSection('pageAccessIds', pageAccessOptions)} style={secondaryActionStyle}>Select all</button>
-                <button type="button" onClick={() => clearAllForSection('pageAccessIds')} style={{ ...secondaryActionStyle, background: '#fff' }}>Clear</button>
-              </div>
-            </div>
-            <div style={{ display: 'grid', gap: 8 }}>
-              {pageAccessOptions.map((item) => (
-                <label key={item.id} style={{ ...toggleRowStyle, padding: '9px 12px' }}>
-                  <span style={{ color: '#0f172a', fontWeight: 600 }}>{item.label}</span>
-                  <input
-                    type="checkbox"
-                    checked={(activeRule.pageAccessIds ?? []).includes(item.id)}
-                    onChange={() => toggleListValue('pageAccessIds', item.id)}
-                    style={{ width: 18, height: 18, accentColor: '#3b82f6' }}
-                  />
-                </label>
-              ))}
-            </div>
-          </div>
-
-          <div style={sectionCardStyle}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <button type="button" onClick={() => selectAllForSection('featureAccessIds', featureOptions)} style={secondaryActionStyle}>Select all</button>
-                <button type="button" onClick={() => clearAllForSection('featureAccessIds')} style={{ ...secondaryActionStyle, background: '#fff' }}>Clear</button>
-              </div>
-            </div>
-            <div style={{ display: 'grid', gap: 8 }}>
-              {featureOptions.map((item) => (
-                <label key={item.id} style={{ ...toggleRowStyle, padding: '9px 12px' }}>
-                  <span style={{ color: '#0f172a', fontWeight: 600 }}>{item.label}</span>
-                  <input
-                    type="checkbox"
-                    checked={(activeRule.featureAccessIds ?? []).includes(item.id)}
-                    onChange={() => toggleListValue('featureAccessIds', item.id)}
-                    style={{ width: 18, height: 18, accentColor: '#3b82f6' }}
-                  />
-                </label>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        <div style={{ ...sectionCardStyle, display: 'grid', gap: 12 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-            <p style={{ margin: 0, color: '#475569', fontSize: 14 }}>Choose which profile sections and values are visible in the user profile card for this role.</p>
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              <button type="button" onClick={() => selectAllForSection('profileFieldIds', profileFieldOptions)} style={secondaryActionStyle}>Select all</button>
-              <button type="button" onClick={() => clearAllForSection('profileFieldIds')} style={{ ...secondaryActionStyle, background: '#fff' }}>Clear</button>
-            </div>
-          </div>
-
-          <div style={{ display: 'grid', gap: 8 }}>
-            {profileFieldOptions.map((item) => (
-              <label key={item.id} style={{ ...toggleRowStyle, padding: '9px 12px' }}>
-                <span style={{ color: '#0f172a', fontWeight: 600 }}>{item.label}</span>
-                <input
-                  type="checkbox"
-                  checked={(activeRule.profileFieldIds ?? []).includes(item.id)}
-                  onChange={() => toggleListValue('profileFieldIds', item.id)}
-                  style={{ width: 18, height: 18, accentColor: '#3b82f6' }}
-                />
-              </label>
-            ))}
-          </div>
-        </div>
-
-        <div style={{ ...sectionCardStyle, display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
-          <div style={{ color: '#334155', fontWeight: 700 }}>
-            <span style={{ color: '#64748b', fontWeight: 600 }}>Current role:</span> {roles.find((role) => role.roleCode === selectedRole)?.label ?? selectedRole}
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-            {saveStatus === 'saved' && (
-              <span style={{ color: '#15803d', fontSize: 13, fontWeight: 700 }}>Saved locally</span>
-            )}
-            <button
-              type="button"
-              onClick={handleSave}
-              style={{
-                background: 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)',
-                color: '#fff',
-                border: 'none',
-                borderRadius: 10,
-                padding: '10px 16px',
-                fontWeight: 800,
-                cursor: 'pointer',
-                boxShadow: '0 10px 22px rgba(124, 58, 237, 0.2)',
-              }}
-            >
-              Save access rules
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                const next = { ...rules };
-                next[selectedRole] = defaultRule(selectedRole, roles.find((role) => role.roleCode === selectedRole)?.label ?? selectedRole);
-                setRules(next);
-                setSaveStatus('idle');
-              }}
-              style={{
-                background: '#0f172a',
-                color: '#fff',
-                border: 'none',
-                borderRadius: 10,
-                padding: '10px 16px',
-                fontWeight: 800,
-                cursor: 'pointer',
-              }}
-            >
-              Reset role access
-            </button>
-          </div>
-        </div>
-      </div>
-    </main>
-  );
+  return <MasterDataWorkspace actions={<><button className={admin.secondary} disabled={loading || saving} onClick={() => { if (!anyChanges || window.confirm('Discard unsaved access changes and reload?')) void loadRoles(); }}>Refresh</button><button className={admin.primary} disabled={loading || saving || !changed || !activeRole} onClick={() => void handleSave()}>{saving ? 'Saving…' : 'Save access rules'}</button></>}>
+    {error && <p role="alert" className={admin.error}>{error}</p>}{notice && <p role="status" className={admin.notice}>{notice}</p>}
+    <section className={admin.panel}><div className={admin.panelHeader}><div><h2>Access delegation</h2><p>Choose a role, review its permissions, then save your changes.</p></div>{changed && <span className={admin.badge}>Unsaved changes</span>}</div>
+      <div className={admin.filters}><label>Role<select value={selectedRole} disabled={loading || saving || !roles.length} onChange={e => { setSelectedRole(e.target.value); setNotice(''); }}><option value="" disabled>Choose a role</option>{roles.map(role => <option key={role.roleCode} value={role.roleCode}>{role.label}</option>)}</select></label><input aria-label="Find a permission" placeholder="Find a permission" value={search} onChange={e => setSearch(e.target.value)} /><button className={admin.secondary} disabled={saving || !changed} onClick={() => { setRules(current => ({...current,[selectedRole]:savedRules[selectedRole]})); setNotice(''); }}>Discard changes</button></div>
+    </section>
+    {loading ? <p className={admin.empty} role="status">Loading access rules…</p> : !activeRole || !activeRule ? <p className={admin.empty}>No roles are available. Add a role and include it in the access matrix to configure permissions.</p> : <fieldset className={master.fieldset} disabled={saving}>
+      <section className={admin.panel}><div className={admin.panelHeader}><div><h2>Account access</h2><p>Sign-in and record visibility for {activeRole.label}.</p></div></div><div className={master.permissionGrid}><label className={master.permissionRow}>Allow login to admin portal<input type="checkbox" checked={activeRule.canLoginToAdminPortal} onChange={e => updateRule({canLoginToAdminPortal:e.target.checked})} /></label><label className={master.permissionRow}>View deleted user records<input type="checkbox" checked={activeRule.canViewDeletedUserRecords} onChange={e => updateRule({canViewDeletedUserRecords:e.target.checked})} /></label></div></section>
+      <div className={master.permissionGrid}>{sections.map(section => {
+        const visible = section.options.filter(option => option.label.toLowerCase().includes(search.toLowerCase()));
+        return <section key={section.key} className={admin.panel}><div className={admin.panelHeader}><div><h2>{section.title}</h2><p>{section.hint}</p></div><span className={admin.badge}>{activeRule[section.key].length} selected</span></div><div className={admin.actions} style={{marginBottom:16}}><button type="button" className={admin.link} onClick={() => updateRule({[section.key]: [...new Set([...activeRule[section.key], ...visible.map(option => option.id)])]})}>Select {search ? 'matching' : 'all'}</button><button type="button" className={admin.link} onClick={() => updateRule({[section.key]:activeRule[section.key].filter(id => !visible.some(option => option.id === id))})}>Clear {search ? 'matching' : 'all'}</button></div>{visible.map(option => <label className={master.permissionRow} key={option.id}>{option.label}<input type="checkbox" checked={activeRule[section.key].includes(option.id)} onChange={() => updateRule({[section.key]:activeRule[section.key].includes(option.id) ? activeRule[section.key].filter(id => id !== option.id) : [...activeRule[section.key], option.id]})} /></label>)}{!visible.length && <p className={admin.empty}>No matching permissions.</p>}</section>;
+      })}</div>
+    </fieldset>}
+  </MasterDataWorkspace>;
 }

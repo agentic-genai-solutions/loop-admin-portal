@@ -1,5 +1,9 @@
 'use client';
 
+import Link from 'next/link';
+import OnboardingWorkspace from '@/components/onboarding/OnboardingWorkspace';
+import admin from '@/components/admin/admin.module.css';
+import styles from '@/components/onboarding/onboarding.module.css';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { FeedbackToast } from '@/components/Feedback';
@@ -78,9 +82,9 @@ export default function OnboardingPage() {
       const isStoreRestricted = isStoreScopedRole(storedUser?.role) && Boolean(currentUserStore);
 
       const [userData, profileData, storesData] = await Promise.all([
-        apiFetchWithRetry<Array<{ email?: string; firstName?: string; lastName?: string; role?: string; isActive?: boolean; storeId?: string; department?: string }>>('/users').catch(() => []),
-        apiFetchWithRetry<Array<OnboardingProfile>>('/onboarding').catch(() => []),
-        apiFetchWithRetry<Array<{ _id?: string; id?: string; name?: string }>>('/stores').catch(() => []),
+        apiFetchWithRetry<Array<{ email?: string; firstName?: string; lastName?: string; role?: string; isActive?: boolean; storeId?: string; department?: string }>>('/users'),
+        apiFetchWithRetry<Array<OnboardingProfile>>('/onboarding'),
+        apiFetchWithRetry<Array<{ _id?: string; id?: string; name?: string }>>('/stores'),
       ]);
 
       const storeLabelById = new Map<string, string>(
@@ -209,7 +213,7 @@ export default function OnboardingPage() {
   };
 
   return (
-    <main className="portal-page">
+    <OnboardingWorkspace actions={<><button className={admin.secondary} disabled={isLoading} onClick={() => void loadData()}>Refresh</button><Link className={admin.primary} href="/users">Manage users</Link></>}>
       {toast && (
         <FeedbackToast
           title={toast.type === 'success' ? 'Success' : 'Error'}
@@ -220,18 +224,9 @@ export default function OnboardingPage() {
         />
       )}
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, gap: 12, flexWrap: 'wrap' }}>
-      </div>
-
-      <div className="row" style={{ marginBottom: 20 }}>
-        <div className="card" style={{ flex: '1 1 200px' }}><strong>{stats.total}</strong><div>Total applicants</div></div>
-        <div className="card" style={{ flex: '1 1 200px' }}><strong>{stats.approved}</strong><div>Approved</div></div>
-        <div className="card" style={{ flex: '1 1 200px' }}><strong>{stats.pending}</strong><div>Pending</div></div>
-        <div className="card" style={{ flex: '1 1 200px' }}><strong>{stats.inReview}</strong><div>In review</div></div>
-      </div>
-
-      <div className="card" style={{ padding: 18, marginBottom: 20, borderRadius: 18, border: '1px solid rgba(148,163,184,0.18)', boxShadow: '0 12px 28px rgba(15,23,42,0.04)' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16, alignItems: 'end' }}>
+      {!isLoading && !hasLoadError && <div className={admin.metrics}>{[['Applicants',stats.total],['Pending',stats.pending],['In review',stats.inReview],['Approved',stats.approved]].map(([label,value]) => <div className={admin.metric} key={label}><span>{label}</span><strong>{value}</strong></div>)}</div>}
+      <div className={admin.panel}><div className={admin.panelHeader}><div><h2>Onboarding overview</h2><p>Find applicants and check their progress and linked user accounts.</p></div><Link className={admin.link} href="/workflow">View workflow guide →</Link></div>
+        <div className={styles.filters}>
           <label style={{ display: 'grid', gap: 8, fontWeight: 700, color: '#475569' }}>
             Search
             <input
@@ -274,66 +269,15 @@ export default function OnboardingPage() {
         </div>
       </div>
 
-      <div className="card" style={{ padding: 18, marginBottom: 20, background: 'linear-gradient(135deg, #f8fafc 0%, #eef2ff 100%)', borderRadius: 18, border: '1px solid rgba(148,163,184,0.18)', boxShadow: '0 12px 28px rgba(15,23,42,0.04)' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14, marginBottom: 18 }}>
-          <div style={{ padding: 14, borderRadius: 12, background: '#fff', border: '1px solid rgba(148,163,184,0.2)' }}>
-            <div style={{ fontWeight: 800, marginBottom: 8 }}>Role: Team Member</div>
-            <div style={{ color: '#475569', lineHeight: 1.6 }}>Submit profile → store manager review → HR confirmation → system activation.</div>
-          </div>
-          <div style={{ padding: 14, borderRadius: 12, background: '#fff', border: '1px solid rgba(148,163,184,0.2)' }}>
-            <div style={{ fontWeight: 800, marginBottom: 8 }}>Role: Store Supervisor</div>
-            <div style={{ color: '#475569', lineHeight: 1.6 }}>Candidate intake → area manager approval → director validation → onboarding complete.</div>
-          </div>
-          <div style={{ padding: 14, borderRadius: 12, background: '#fff', border: '1px solid rgba(148,163,184,0.2)' }}>
-            <div style={{ fontWeight: 800, marginBottom: 8 }}>Role: Finance / Operations</div>
-            <div style={{ color: '#475569', lineHeight: 1.6 }}>Initial review → department head approval → finance ops confirmation → final activation.</div>
-          </div>
-        </div>
-
-        <div style={{ overflowX: 'auto', paddingBottom: 8 }}>
-          <svg viewBox="0 0 900 240" width="100%" height="240" role="img" aria-label="Onboarding approval flow diagram" style={{ minWidth: 760, display: 'block' }}>
-            <defs>
-              <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
-                <path d="M0,0 L0,6 L9,3 z" fill="#475569" />
-              </marker>
-            </defs>
-
-            <rect x="20" y="80" width="150" height="60" rx="14" fill="#dbeafe" stroke="#93c5fd" />
-            <text x="95" y="110" textAnchor="middle" fill="#0f172a" fontSize="17" fontWeight="700">Apply</text>
-            <text x="95" y="132" textAnchor="middle" fill="#334155" fontSize="13">Candidate</text>
-
-            <rect x="220" y="80" width="180" height="60" rx="14" fill="#ede9fe" stroke="#c4b5fd" />
-            <text x="310" y="110" textAnchor="middle" fill="#0f172a" fontSize="17" fontWeight="700">Department</text>
-            <text x="310" y="132" textAnchor="middle" fill="#334155" fontSize="13">Review</text>
-
-            <rect x="460" y="80" width="190" height="60" rx="14" fill="#dcfce7" stroke="#86efac" />
-            <text x="555" y="110" textAnchor="middle" fill="#0f172a" fontSize="17" fontWeight="700">Manager</text>
-            <text x="555" y="132" textAnchor="middle" fill="#334155" fontSize="13">Approval</text>
-
-            <rect x="700" y="80" width="170" height="60" rx="14" fill="#fef3c7" stroke="#fbbf24" />
-            <text x="785" y="110" textAnchor="middle" fill="#0f172a" fontSize="17" fontWeight="700">Activate</text>
-            <text x="785" y="132" textAnchor="middle" fill="#334155" fontSize="13">User Access</text>
-
-            <path d="M170 110 H220" stroke="#475569" strokeWidth="2.5" fill="none" markerEnd="url(#arrow)" />
-            <path d="M400 110 H460" stroke="#475569" strokeWidth="2.5" fill="none" markerEnd="url(#arrow)" />
-            <path d="M650 110 H700" stroke="#475569" strokeWidth="2.5" fill="none" markerEnd="url(#arrow)" />
-
-            <text x="95" y="190" textAnchor="middle" fill="#475569" fontSize="12">Submission</text>
-            <text x="310" y="190" textAnchor="middle" fill="#475569" fontSize="12">Assess</text>
-            <text x="555" y="190" textAnchor="middle" fill="#475569" fontSize="12">Approve</text>
-            <text x="785" y="190" textAnchor="middle" fill="#475569" fontSize="12">Finalize</text>
-          </svg>
-        </div>
-      </div>
-
-      <div className="card" style={{ padding: 18, borderRadius: 18, border: '1px solid rgba(148,163,184,0.18)', boxShadow: '0 12px 28px rgba(15,23,42,0.04)' }}>
+      <div className={admin.panel}>
+        <p className={admin.count}>{sortedProfiles.length} applicants shown</p>
         {isLoading ? (
           <TableSkeleton columns={7} rows={4} />
         ) : hasLoadError ? (
           <EmptyState variant="error" onRetry={loadData} />
         ) : (
           <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
-            <table className="table" style={{ minWidth: 980 }}>
+            <table className={admin.table} style={{ minWidth: 980 }}>
               <thead>
                 <tr>
                   <th>
@@ -410,6 +354,6 @@ export default function OnboardingPage() {
           </div>
         )}
       </div>
-    </main>
+    </OnboardingWorkspace>
   );
 }

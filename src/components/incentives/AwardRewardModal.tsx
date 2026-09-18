@@ -70,7 +70,8 @@ export default function AwardRewardModal({ programs, onClose, onAwarded, onProgr
   const [stores, setStores] = useState<Store[]>([]);
   const [employeeId, setEmployeeId] = useState('');
   const [storeId, setStoreId] = useState('');
-  const [amount, setAmount] = useState(String(program.amount || Number(program.payout.replace(/[^0-9.]/g, '')) || ''));
+  const amount = program.amount ?? Number(program.payout.replace(/[^0-9.]/g, ''));
+  const rewardLabel = new Intl.NumberFormat('en-IN', { style: 'currency', currency: program.currency || 'INR' }).format(amount || 0);
   const now = new Date();
   const [period, setPeriod] = useState(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`);
   const [savedId, setSavedId] = useState(isServerId(program.id) ? program.id : undefined);
@@ -112,7 +113,7 @@ export default function AwardRewardModal({ programs, onClose, onAwarded, onProgr
       let id = savedId;
       if (!id) {
         const saved = await apiFetch<{ id: string }>('/incentives/programs', { method: 'POST', body: JSON.stringify({
-          name: program.name, scope, amount: program.amount || Number(amount), currency: program.currency || 'USD', frequency: program.frequency || 'Monthly',
+          name: program.name, scope, amount: program.amount || Number(amount), currency: program.currency || 'INR', frequency: program.frequency || 'Monthly',
           guideline: program.guideline || '', targetMetric: program.targetMetric || '', targetValue: program.targetValue || '', notificationScope,
           storeIds: scope === 'store' ? eligibleStoreIds : [], employeeIds: scope === 'employee' ? eligibleEmployeeIds : [],
         }) });
@@ -138,7 +139,6 @@ export default function AwardRewardModal({ programs, onClose, onAwarded, onProgr
           <label>Reward program<select required autoFocus value={chosenProgram?.id || ''} onChange={event => {
             const next = activePrograms.find(item => item.id === event.target.value) || null;
             setChosenProgram(next); setEmployeeId(''); setStoreId(''); setError('');
-            setAmount(next ? String(next.amount || Number(next.payout.replace(/[^0-9.]/g, '')) || '') : '');
             setSavedId(isServerId(next?.id) ? next?.id : undefined);
             setNotificationScope(next?.notificationScope || 'employee');
           }}><option value="">Choose a program</option>{activePrograms.map(item => <option key={item.id} value={item.id}>{item.name} · {item.payout}</option>)}</select></label>
@@ -147,9 +147,9 @@ export default function AwardRewardModal({ programs, onClose, onAwarded, onProgr
             <div className={styles.awardBanner}><span aria-hidden="true">🏆</span><div><strong>{program.name}</strong><p>{program.payout} · {program.frequency || 'Monthly'}</p></div></div>
         <label>Store<select value={storeId} onChange={event => { setStoreId(event.target.value); setEmployeeId(''); }}><option value="">All eligible stores</option>{stores.filter(store => eligible.some(user => user.storeId === store._id)).map(store => <option key={store._id} value={store._id}>{store.name}</option>)}</select></label>
         <EmployeeSelect key={`${program.id}-${storeId}`} employees={visible} value={employeeId} onChange={setEmployeeId} />
-        <div className={styles.awardColumns}><label>Reward amount ({program.currency || 'USD'})<input type="number" min="0.01" step="0.01" required value={amount} onChange={event => setAmount(event.target.value)} /></label><label>Reward month<input type="month" required value={period} onChange={event => setPeriod(event.target.value)} /></label></div>
+        <div className={styles.awardColumns}><div className={styles.fixedReward}><small>Fixed reward</small><strong>{rewardLabel}</strong></div><label>Reward month<input type="month" required value={period} onChange={event => setPeriod(event.target.value)} /></label></div>
         {!savedId && <label>Who hears about this reward?<select value={notificationScope} onChange={event => setNotificationScope(event.target.value)}><option value="employee">Employee only</option><option value="store">Employee’s store</option><option value="organization">Everyone in the organization</option></select><small>Your browser-saved program will be saved online with this setting.</small></label>}
-        <div className={styles.awardSummary}><strong>{selected ? `${fullName(selected)} receives ${program.currency || 'USD'} ${Number(amount || 0).toLocaleString()}` : 'Choose an employee above'}</strong><p>Notification: {audience}.</p><small>This records an approved reward. It does not make a payment.</small></div>
+        <div className={styles.awardSummary}><strong>{selected ? `${fullName(selected)} receives ${rewardLabel}` : 'Choose an employee above'}</strong><p>Notification: {audience}.</p><small>This records an approved reward. It does not make a payment.</small></div>
           </>}
         </fieldset>
       </div>

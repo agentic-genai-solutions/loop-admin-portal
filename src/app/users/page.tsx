@@ -1,9 +1,13 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ConfirmDialog, FeedbackToast } from '@/components/Feedback';
-import { ButtonLoader, EmptyState, TableSkeleton } from '@/components/Loaders';
-import { apiFetchWithRetry } from '@/lib/api';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { FeedbackToast } from '@/components/Feedback';
+import { EmptyState, TableSkeleton } from '@/components/Loaders';
+import OnboardingWorkspace from '@/components/onboarding/OnboardingWorkspace';
+import { AdminDialog } from '@/components/admin/AdminWorkspace';
+import admin from '@/components/admin/admin.module.css';
+import styles from '@/components/onboarding/onboarding.module.css';
+import { apiFetch, apiFetchWithRetry } from '@/lib/api';
 import { DEFAULT_ONBOARDING_STAGES, DEFAULT_STORE_OPTIONS } from '@/lib/constants';
 import { isStoreScopedRole, normalizeRole, shouldShowStoreField } from '@/lib/utils';
 
@@ -49,6 +53,14 @@ const getUserDisplayName = (user: Pick<UserRow, 'title' | 'firstName' | 'lastNam
 const initialUsers: UserRow[] = [];
 
 export default function UsersPage() {
+  const mutationLock = useRef(false);
+  const [busy, setBusy] = useState(false);
+  const [feedbackError, setFeedbackError] = useState('');
+  const runMutation = async (operation: () => Promise<void>) => {
+    if (mutationLock.current) return;
+    mutationLock.current = true; setBusy(true); setFeedbackError('');
+    try { await operation(); } finally { mutationLock.current = false; setBusy(false); }
+  };
   const [query, setQuery] = useState('');
   const [roleFilter, setRoleFilter] = useState('All');
   const [storeFilter, setStoreFilter] = useState('All');
@@ -70,7 +82,6 @@ export default function UsersPage() {
   const [onboardingOptions, setOnboardingOptions] = useState<SelectOption[]>(
     DEFAULT_ONBOARDING_STAGES.map((stage) => ({ value: stage, label: stage })),
   );
-  const [pendingDeleteUser, setPendingDeleteUser] = useState<(typeof initialUsers)[number] | null>(null);
   const [editingUser, setEditingUser] = useState<(typeof initialUsers)[number] | null>(null);
   const [editForm, setEditForm] = useState({
     title: '',
@@ -89,7 +100,7 @@ export default function UsersPage() {
   });
   const [toast, setToast] = useState<{ title: string; description: string; type: 'success' | 'error' } | null>(null);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
-  const countryCodes = ['+91', '+1', '+44', '+61', '+971', '+966', '+92', '+971', '+65', '+971'];
+  const countryCodes = ['+91', '+1', '+44', '+61', '+971', '+966', '+92', '+65'];
 
   const [form, setForm] = useState({
     title: '',
@@ -117,6 +128,7 @@ export default function UsersPage() {
     }
   }, []);
 
+  const canManageStatus = currentUserRole.includes('super_admin');
   const currentUserRoleCodes = useMemo(() => currentUserRole, [currentUserRole]);
 
   const canViewDeletedRecords = useMemo(() => {
@@ -291,6 +303,7 @@ export default function UsersPage() {
   );
 
   const showToast = useCallback((description: string, type: 'success' | 'error' = 'success', title?: string) => {
+    setFeedbackError(type === 'error' ? description : '');
     setToast({
       type,
       title: title ?? (type === 'success' ? 'Success' : 'Error'),
@@ -299,16 +312,17 @@ export default function UsersPage() {
   }, []);
 
   const loadUsers = useCallback(async () => {
+    setFeedbackError('');
     setIsLoadingUsers(true);
     setHasLoadError(false);
 
     try {
       const [userData, designationData, onboardingData, storesData, rolesData] = await Promise.all([
         apiFetchWithRetry<Array<any>>('/users'),
-        apiFetchWithRetry<Array<{ _id?: string; code?: string; label?: string }>>('/master-data/designations').catch(() => []),
-        apiFetchWithRetry<Array<{ value: string; label: string }>>('/auth/onboarding-stages').catch(() => []),
-        apiFetchWithRetry<Array<any>>('/stores').catch(() => []),
-        apiFetchWithRetry<Array<{ roleCode?: string; label?: string; canViewDeletedUserRecords?: boolean }>>('/master-data/roles').catch(() => []),
+        apiFetchWithRetry<Array<{ _id?: string; code?: string; label?: string }>>('/master-data/designations'),
+        apiFetchWithRetry<Array<{ value: string; label: string }>>('/auth/onboarding-stages'),
+        apiFetchWithRetry<Array<any>>('/stores'),
+        apiFetchWithRetry<Array<{ roleCode?: string; label?: string; canViewDeletedUserRecords?: boolean }>>('/master-data/roles'),
       ]);
 
       const nextRoleOptions = Array.from(
@@ -399,7 +413,7 @@ export default function UsersPage() {
           status: user.isActive === false ? 'Inactive' : 'Active',
           onboarding: onboardingLabel || 'Completed',
           onboardingId: onboardingId || undefined,
-          isDeleted: user.isDeleted === true || user.isActive === false,
+          isDeleted: user.isDeleted === true,
           isDeactivated: user.isActive === false,
         };
       });
@@ -428,21 +442,16 @@ export default function UsersPage() {
     setSortDirection('asc');
   };
 
-  const handleDeactivate = (email: string) => {
-    const targetUser = users.find((user) => user.email === email);
-    if (!targetUser) {
-      showToast('User not found.', 'error');
-      return;
-    }
-
-    const nextStatus = targetUser.isDeactivated ? 'Active' : 'Inactive';
-    setUsers((current) =>
-      current.map((user) =>
-        user.email === email ? { ...user, isDeactivated: !user.isDeactivated, status: nextStatus } : user,
-      ),
-    );
-    showToast(`${getUserDisplayName(targetUser)} was marked ${nextStatus.toLowerCase()}.`, 'success');
-  };
+  const handleDeactivate = (email: string) => runMutation(async () => {
+    const target = users.find(user => user.email === email);
+    if (!target?._id) { showToast('User record could not be found.', 'error'); return; }
+    try {
+      const updated = await apiFetch<{isActive?: boolean}>(`/users/${encodeURIComponent(target._id)}`, { method:'PATCH', body:JSON.stringify({isActive:target.isDeactivated}) });
+      if (updated.isActive !== target.isDeactivated) throw new Error('Status update was not applied.');
+      await loadUsers();
+      showToast(`${getUserDisplayName(target)} is now ${target.isDeactivated ? 'active' : 'inactive'}.`, 'success');
+    } catch { showToast('Unable to update user status. Please try again.', 'error'); }
+  });
 
   const handleEditUser = (user: (typeof initialUsers)[number]) => {
     const rawMobile = String(user.mobile ?? '').trim();
@@ -479,7 +488,8 @@ export default function UsersPage() {
     return nextErrors;
   }, [editForm, form, getFormErrors, editingUser]);
 
-  const handleUpdateUser = async () => {
+  const handleUpdateUser = () => runMutation(handleUpdateUserRequest);
+  const handleUpdateUserRequest = async () => {
     if (!editingUser?._id) {
       showToast('User record ID is missing.', 'error');
       return;
@@ -507,10 +517,10 @@ export default function UsersPage() {
         onboardingId: editForm.onboardingId || undefined,
         storeId: editForm.storeId || undefined,
         departmentId: editForm.storeId || undefined,
-        isActive: editForm.isActive,
+        ...(canManageStatus ? {isActive: editForm.isActive} : {}),
       };
 
-      await apiFetchWithRetry(`/users/${editingUser._id}`, {
+      await apiFetch(`/users/${editingUser._id}`, {
         method: 'PATCH',
         body: JSON.stringify(payload),
       });
@@ -523,35 +533,8 @@ export default function UsersPage() {
     }
   };
 
-  const handleDelete = (user: (typeof initialUsers)[number]) => {
-    setPendingDeleteUser(user);
-  };
-
-  const confirmDeleteUser = () => {
-    if (!pendingDeleteUser) {
-      showToast('No user selected for deletion.', 'error', 'Delete failed');
-      return;
-    }
-
-    const deletedUserName = getUserDisplayName(pendingDeleteUser);
-
-    setUsers((current) =>
-      current.map((user) =>
-        user.email === pendingDeleteUser.email
-          ? {
-              ...user,
-              isDeleted: true,
-              isDeactivated: true,
-              status: 'Inactive',
-            }
-          : user,
-      ),
-    );
-    setPendingDeleteUser(null);
-    showToast(`${deletedUserName} has been removed from active user records.`, 'success', 'User deleted');
-  };
-
-  const handleAddUser = async () => {
+  const handleAddUser = () => runMutation(handleAddUserRequest);
+  const handleAddUserRequest = async () => {
     const errors = validateCurrentModalForm();
     if (Object.keys(errors).length > 0) {
       showToast(Object.values(errors)[0], 'error');
@@ -565,7 +548,7 @@ export default function UsersPage() {
     }
 
     const normalizedMobile = normalizeMobileValue(form.countryCode, form.phoneNumber);
-    const selectedDesignation = designationOptions.find((option) => option.value === form.designationId) ?? designationOptions[0];
+    const selectedDesignation = designationOptions.find((option) => option.value === form.designationId);
 
     if (!selectedDesignation) {
       showToast('Please select a valid designation before creating the user.', 'error');
@@ -589,7 +572,7 @@ export default function UsersPage() {
         joinedDate: new Date().toISOString(),
       };
 
-      await apiFetchWithRetry('/users/create', {
+      await apiFetch('/users/create', {
         method: 'POST',
         body: JSON.stringify(payload),
       });
@@ -646,41 +629,19 @@ export default function UsersPage() {
   const modalTitle = activeUserModal === 'edit' ? 'Edit user' : 'Create user and assign store';
   const modalForm = activeUserModal === 'edit' ? editForm : form;
 
-  const iconButtonStyle = {
-    width: 32,
-    height: 32,
-    borderRadius: '50%',
-    border: '1px solid rgba(148,163,184,0.35)',
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    cursor: 'pointer',
-    background: 'rgba(255,255,255,0.4)',
-    color: '#0f172a',
-    padding: 0,
-  } as const;
-
   return (
-    <main className="portal-page">
+    <OnboardingWorkspace actions={<><button className={admin.secondary} disabled={isLoadingUsers || busy} onClick={() => void loadUsers()}>Refresh</button><button className={admin.primary} disabled={isLoadingUsers || hasLoadError || busy} onClick={() => { setFeedbackError(''); setShowAddUser(true); }}>+ Add user</button></>}>
       {toast && <FeedbackToast title={toast.title} description={toast.description} type={toast.type} onClose={() => setToast(null)} durationMs={2800} />}
-      <ConfirmDialog
-        open={Boolean(pendingDeleteUser)}
-        title="Delete user?"
-        description={pendingDeleteUser ? <>Are you sure you want to delete <strong>{getUserDisplayName(pendingDeleteUser)}</strong> ({pendingDeleteUser.email})?</> : ''}
-        confirmLabel="Delete user"
-        onCancel={() => setPendingDeleteUser(null)}
-        onConfirm={confirmDeleteUser}
-      />
 
       {activeUserModal && (
-        <div style={{ position: 'fixed', top: 0, right: 0, bottom: 0, width: 'min(760px, 100vw)', zIndex: 60, display: 'flex', flexDirection: 'column', background: '#f8fafc', borderLeft: '1px solid #e2e8f0', boxShadow: '-20px 0 60px rgba(15, 23, 42, 0.16)' }}>
-          <div className="card" style={{ width: '100%', height: '100vh', padding: 0, borderRadius: 0, background: '#f8fafc', boxShadow: 'none', border: 'none', borderLeft: '1px solid #e2e8f0', overflow: 'hidden' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '18px 22px 16px', borderBottom: '1px solid rgba(148, 163, 184, 0.25)', background: '#f8fafc' }}>
+        <AdminDialog title={modalTitle} busy={busy} onClose={closeUserModal}>
+            <div className={admin.dialogHeader}>
               <h2 style={{ margin: 0, fontSize: 26, letterSpacing: '-0.03em', color: '#0f172a', fontWeight: 800 }}>{modalTitle}</h2>
-              <button type="button" onClick={closeUserModal} style={{ border: 'none', background: 'transparent', fontSize: 30, cursor: 'pointer', color: '#475569', lineHeight: 1, padding: 0 }}>×</button>
+              <button type="button" disabled={busy} aria-label="Close dialog" onClick={closeUserModal} style={{ border: 'none', background: 'transparent', fontSize: 30, cursor: 'pointer', color: '#475569', lineHeight: 1, padding: 0 }}>×</button>
             </div>
 
-            <div style={{ padding: 24, display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', columnGap: 16, rowGap: 14, overflowY: 'auto', height: 'calc(100vh - 150px)' }}>
+            <fieldset disabled={busy} className={styles.fields}>
+              {feedbackError && <p className={`${admin.error} ${styles.full}`} role="alert">{feedbackError}</p>}
               <label style={{ display: 'grid', gap: 6, color: '#334155', fontWeight: 700, fontSize: 15 }}>
                 Title
                 <select
@@ -905,7 +866,7 @@ export default function UsersPage() {
                 {formErrors.onboarding && <span style={{ color: '#b91c1c', fontSize: 12, marginTop: 2 }}>{formErrors.onboarding}</span>}
               </label>
 
-              {activeUserModal === 'edit' && (
+              {activeUserModal === 'edit' && canManageStatus && (
                 <label style={{ display: 'flex', alignItems: 'center', gap: 10, color: '#334155', fontWeight: 700, fontSize: 15, gridColumn: '1 / -1' }}>
                   <input
                     type="checkbox"
@@ -916,33 +877,16 @@ export default function UsersPage() {
                   Active user
                 </label>
               )}
-            </div>
+            </fieldset>
 
-            <div style={{ padding: '0 24px 24px', display: 'flex', justifyContent: 'flex-start', gap: 12, flexWrap: 'wrap', borderTop: '1px solid rgba(148, 163, 184, 0.2)', paddingTop: 20 }}>
-              <button type="button" onClick={activeUserModal === 'edit' ? handleUpdateUser : handleAddUser} style={{ minWidth: activeUserModal === 'edit' ? 180 : 170, padding: '16px 20px', background: '#0f172a', color: '#fff', border: 'none', borderRadius: 10, cursor: 'pointer', fontWeight: 800, fontSize: 20, boxShadow: '0 10px 24px rgba(15, 23, 42, 0.18)' }}>
-                {modalSubmitLabel}
-              </button>
-              <button type="button" onClick={closeUserModal} style={{ minWidth: 140, padding: '16px 20px', background: '#e2e8f0', color: '#0f172a', border: 'none', borderRadius: 10, cursor: 'pointer', fontWeight: 800, fontSize: 20 }}>
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
+            <footer className={admin.dialogFooter}><button type="button" className={admin.secondary} disabled={busy} onClick={closeUserModal}>Cancel</button><button type="button" className={admin.primary} disabled={busy} onClick={() => void (activeUserModal === 'edit' ? handleUpdateUser() : handleAddUser())}>{busy ? 'Saving…' : modalSubmitLabel}</button></footer>
+        </AdminDialog>
       )}
 
-      <div className="card" style={{ padding: 20, marginBottom: 24 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 18 }}>
-          <div style={{ flex: 1 }} />
-
-          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
-            <ButtonLoader label="Refresh" loading={isLoadingUsers} variant="secondary" onClick={() => void loadUsers()} />
-            <button type="button" onClick={() => setShowAddUser(true)} style={{ padding: '10px 16px', background: '#111827', color: '#fff', border: 'none', borderRadius: 10, cursor: 'pointer', fontWeight: 700 }}>
-              + Add User
-            </button>
-          </div>
-        </div>
-
-        <div style={{ display: 'grid', gridTemplateColumns: shouldDisplayStore ? 'minmax(220px, 1.2fr) minmax(180px, 0.9fr) minmax(180px, 0.9fr) minmax(180px, 0.9fr) minmax(180px, 0.9fr)' : 'minmax(220px, 1.5fr) minmax(180px, 1.2fr) minmax(180px, 1.1fr) minmax(180px, 1.1fr)', gap: 16, marginBottom: 18 }}>
+      {feedbackError && !activeUserModal && <p className={admin.error} role="alert">{feedbackError}</p>}
+      <section className={admin.panel}>
+        <div className={admin.panelHeader}><div><h2>User directory</h2><p>Create employee accounts, assign stores, and manage account status.</p></div></div>
+        <div className={styles.filters}>
           <label style={{ display: 'grid', gap: 8, color: '#334155', fontWeight: 700, fontSize: 13 }}>
             Search
             <input
@@ -992,13 +936,14 @@ export default function UsersPage() {
           </label>
         </div>
 
+        <p className={admin.count}>{filteredUsers.length} users shown</p>
         <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
           {isLoadingUsers ? (
             <TableSkeleton columns={7} rows={4} />
           ) : hasLoadError ? (
             <EmptyState variant="error" onRetry={loadUsers} />
           ) : (
-            <table className="table" style={{ minWidth: 900 }}>
+            <table className={admin.table} style={{ minWidth: 900 }}>
               <thead>
                 <tr>
                   <th>
@@ -1052,56 +997,9 @@ export default function UsersPage() {
                     </td>
                     <td style={{ position: 'sticky', right: 0, background: '#fff', zIndex: 1 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'nowrap', minWidth: 142 }}>
-                        <button type="button" aria-label={`Edit ${getUserDisplayName(user)}`} title="Edit user" onClick={() => handleEditUser(user)} style={{ ...iconButtonStyle, background: '#dbeafe', color: '#1d4ed8' }}>
-                          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                            <path d="M12 20h9" />
-                            <path d="M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5Z" />
-                          </svg>
-                        </button>
+                        <button type="button" className={admin.link} aria-label={`Edit ${getUserDisplayName(user)}`} disabled={busy} onClick={() => { setFeedbackError(''); handleEditUser(user); }}>Edit</button>
+                        {canManageStatus && <button type="button" className={admin.secondary} disabled={busy} onClick={() => void handleDeactivate(user.email)}>{user.isDeactivated ? 'Activate' : 'Deactivate'}</button>}
 
-                        <button
-                          type="button"
-                          aria-label={user.isDeactivated ? `Activate ${getUserDisplayName(user)}` : `Deactivate ${getUserDisplayName(user)}`}
-                          title={user.isDeactivated ? 'Activate user' : 'Deactivate user'}
-                          onClick={() => handleDeactivate(user.email)}
-                          style={{
-                            ...iconButtonStyle,
-                            background: user.isDeactivated ? '#e2e8f0' : '#fef3c7',
-                            color: user.isDeactivated ? '#334155' : '#92400e',
-                          }}
-                        >
-                          {user.isDeactivated ? (
-                            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                              <path d="M5 12h14" />
-                              <circle cx="12" cy="12" r="9" />
-                            </svg>
-                          ) : (
-                            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                              <circle cx="12" cy="12" r="9" />
-                              <path d="M8 12h8" />
-                            </svg>
-                          )}
-                        </button>
-
-                        <button
-                          type="button"
-                          aria-label={`Delete ${getUserDisplayName(user)}`}
-                          title="Delete user"
-                          onClick={() => handleDelete(user)}
-                          style={{
-                            ...iconButtonStyle,
-                            background: '#fee2e2',
-                            color: '#991b1b',
-                            borderColor: 'rgba(239,68,68,0.35)',
-                          }}
-                        >
-                          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                            <path d="M3 6h18" />
-                            <path d="M8 6V4h8v2" />
-                            <path d="M19 6l-1 14H6L5 6" />
-                            <path d="M10 11v6M14 11v6" />
-                          </svg>
-                        </button>
                       </div>
                     </td>
                   </tr>
@@ -1113,7 +1011,7 @@ export default function UsersPage() {
             </table>
           )}
         </div>
-      </div>
-    </main>
+      </section>
+    </OnboardingWorkspace>
   );
 }

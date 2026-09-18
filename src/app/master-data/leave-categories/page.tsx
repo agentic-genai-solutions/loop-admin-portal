@@ -2,7 +2,11 @@
 
 import { ConfirmDialog, FeedbackToast } from '@/components/Feedback';
 import { useEffect, useMemo, useState } from 'react';
-import { apiFetchWithRetry } from '@/lib/api';
+import MasterDataWorkspace from '@/components/master-data/MasterDataWorkspace';
+import { AdminDialog } from '@/components/admin/AdminWorkspace';
+import admin from '@/components/admin/admin.module.css';
+import master from '@/components/master-data/master-data.module.css';
+import { apiFetch, apiFetchWithRetry } from '@/lib/api';
 import { getFieldBorder, inlineFieldErrorStyle } from '@/lib/form-ui';
 import { useCallback, useRef } from 'react';
 
@@ -59,7 +63,18 @@ const iconButtonStyle: React.CSSProperties = {
 };
 
 export default function LeaveCategoriesMasterDataPage() {
+  const mutationLock = useRef(false);
+  const [feedbackError, setFeedbackError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const runMutation = async (operation: () => Promise<void>) => {
+    if (mutationLock.current) return;
+    mutationLock.current = true; setBusy(true); setFeedbackError('');
+    try { await operation(); } finally { mutationLock.current = false; setBusy(false); }
+  };
+
   const leaveCategoryNameInputRef = useRef<HTMLInputElement | null>(null);
+  const [search, setSearch] = useState('');
+  const [status, setStatus] = useState('all');
   const [records, setRecords] = useState<LeaveCategoryRecord[]>([]);
   const [designationOptions, setDesignationOptions] = useState<DesignationOption[]>([]);
   const [storeOptions, setStoreOptions] = useState<StoreOption[]>([]);
@@ -84,6 +99,7 @@ export default function LeaveCategoriesMasterDataPage() {
   );
 
   const showToast = useCallback((description: string, type: 'success' | 'error' = 'success', title?: string) => {
+    setFeedbackError(type === 'error' ? description : '');
     setToast({
       title: title ?? (type === 'success' ? 'Success' : 'Error'),
       description,
@@ -141,6 +157,7 @@ export default function LeaveCategoriesMasterDataPage() {
       return;
     }
 
+    setFeedbackError('');
     setIsLoading(true);
 
     try {
@@ -150,8 +167,8 @@ export default function LeaveCategoriesMasterDataPage() {
 
       const [leaveCategoryData, designationData, storesData] = await Promise.all([
         apiFetchWithRetry<LeaveCategoryRecord[]>(leaveCategoryQuery),
-        apiFetchWithRetry<Array<{ _id?: string; code?: string; label?: string }>>('/master-data/designations').catch(() => []),
-        apiFetchWithRetry<Array<{ _id?: string; id?: string; name?: string }>>('/stores').catch(() => []),
+        apiFetchWithRetry<Array<{ _id?: string; code?: string; label?: string }>>('/master-data/designations'),
+        apiFetchWithRetry<Array<{ _id?: string; id?: string; name?: string }>>('/stores'),
       ]);
 
       const normalizedDesignations = (Array.isArray(designationData) ? designationData : [])
@@ -198,6 +215,7 @@ export default function LeaveCategoriesMasterDataPage() {
   }, [loadData]);
 
   const resetForm = () => {
+    setFeedbackError('');
     const nextForm = { ...emptyForm, storeId: assignedStoreId || '' };
     setForm(nextForm);
     setFormErrors({});
@@ -209,7 +227,8 @@ export default function LeaveCategoriesMasterDataPage() {
     resetForm();
   };
 
-  const saveRecord = async () => {
+  const saveRecord = () => runMutation(() => saveRecordRequest());
+  const saveRecordRequest = async () => {
     const nextErrors: LeaveCategoryFormErrors = {};
     const normalizedName = form.name.trim();
     const normalizedStaffCategory = form.staffCategory.trim();
@@ -255,12 +274,12 @@ export default function LeaveCategoriesMasterDataPage() {
       };
 
       if (editingId) {
-        await apiFetchWithRetry(`/admin/leave-categories/${editingId}`, {
+        await apiFetch(`/admin/leave-categories/${editingId}`, {
           method: 'PATCH',
           body: JSON.stringify(payload),
         });
       } else {
-        await apiFetchWithRetry('/admin/leave-categories', {
+        await apiFetch('/admin/leave-categories', {
           method: 'POST',
           body: JSON.stringify(payload),
         });
@@ -274,9 +293,10 @@ export default function LeaveCategoriesMasterDataPage() {
     }
   };
 
-  const toggleStatus = async (record: LeaveCategoryRecord) => {
+  const toggleStatus = (record: LeaveCategoryRecord) => runMutation(() => toggleStatusRequest(record));
+  const toggleStatusRequest = async (record: LeaveCategoryRecord) => {
     try {
-      await apiFetchWithRetry(`/admin/leave-categories/${record._id}/status`, {
+      await apiFetch(`/admin/leave-categories/${record._id}/status`, {
         method: 'PATCH',
         body: JSON.stringify({ isActive: !record.isActive }),
       });
@@ -287,9 +307,10 @@ export default function LeaveCategoriesMasterDataPage() {
     }
   };
 
-  const deleteRecord = async (id: string) => {
+  const deleteRecord = (id: string) => runMutation(() => deleteRecordRequest(id));
+  const deleteRecordRequest = async (id: string) => {
     try {
-      await apiFetchWithRetry(`/admin/leave-categories/${id}`, {
+      await apiFetch(`/admin/leave-categories/${id}`, {
         method: 'DELETE',
       });
 
@@ -342,8 +363,13 @@ export default function LeaveCategoriesMasterDataPage() {
     setForm((current) => ({ ...current, name: 'Privilege Leave', annualAllowanceDays: 18 }));
   };
 
+  const filteredRecords = records.filter(record =>
+    `${record.name} ${record.code} ${designationLabelById.get(record.staffCategory) || ''}`.toLowerCase().includes(search.toLowerCase()) &&
+    (status === 'all' || Boolean(record.isActive) === (status === 'active'))
+  );
   return (
-    <main className="portal-page portal-page-grid" style={{ display: 'grid', gap: 20 }}>
+    <MasterDataWorkspace actions={<><button className={admin.secondary} disabled={isLoading || busy} onClick={() => void loadData()}>Refresh</button><button className={admin.primary} disabled={isLoading || busy} onClick={() => { resetForm(); setIsFormOpen(true); }}>+ Add leave category</button></>}>
+      {feedbackError && !isFormOpen && <p className={admin.error} role="alert">{feedbackError}</p>}
       {toast && (
         <FeedbackToast
           title={toast.title}
@@ -355,6 +381,7 @@ export default function LeaveCategoriesMasterDataPage() {
       )}
 
       <ConfirmDialog
+        isProcessing={busy}
         open={Boolean(deleteCandidate)}
         title="Delete leave category"
         description={`Are you sure you want to delete ${deleteCandidate?.name ?? 'this leave category'}? This action cannot be undone.`}
@@ -364,33 +391,21 @@ export default function LeaveCategoriesMasterDataPage() {
       />
 
       {isFormOpen && (
-        <div
-          role="presentation"
-          onClick={closeForm}
-          style={{ position: 'fixed', inset: 0, zIndex: 70, background: 'rgba(15,23,42,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}
-        >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-label={editingId ? 'Edit leave category' : 'Create leave category'}
-            onClick={(event) => event.stopPropagation()}
-            style={{ width: 'min(920px, 100%)', maxHeight: '90vh', overflowY: 'auto', background: '#f8fafc', borderRadius: 18, boxShadow: '0 28px 80px rgba(15, 23, 42, 0.28)', border: '1px solid rgba(148,163,184,0.2)' }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '18px 22px', borderBottom: '1px solid rgba(148,163,184,0.18)' }}>
+        <AdminDialog title="Leave categories" busy={busy} onClose={closeForm}>
+            <div className={admin.dialogHeader}>
               <div>
                 <h2 style={{ margin: 0, fontSize: 26, letterSpacing: '-0.03em' }}>{editingId ? 'Edit leave category' : 'Create leave category'}</h2>
                 <p style={{ margin: '6px 0 0', color: '#64748b', fontSize: 13 }}>Configure leave category policy by staff category.</p>
               </div>
-              <button type="button" aria-label="Close dialog" title="Close dialog" onClick={closeForm} style={{ border: 'none', background: 'transparent', fontSize: 28, cursor: 'pointer', color: '#475569', lineHeight: 1, padding: 0 }}>×</button>
+              <button type="button" disabled={busy} aria-label="Close dialog" title="Close dialog" onClick={closeForm} style={{ border: 'none', background: 'transparent', fontSize: 28, cursor: 'pointer', color: '#475569', lineHeight: 1, padding: 0 }}>×</button>
             </div>
 
-            <form onSubmit={(event) => { event.preventDefault(); void saveRecord(); }} style={{ padding: 20 }}>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>
-                <div style={{ display: 'grid', gap: 4 }}>
-                  <input ref={leaveCategoryNameInputRef} placeholder="Name" value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} style={{ padding: '10px 12px', borderRadius: 10, border: getFieldBorder(Boolean(formErrors.name)) }} />
-                  {formErrors.name && <small style={inlineFieldErrorStyle}>{formErrors.name}</small>}
-                </div>
-                <select
+            <form onSubmit={(event) => { event.preventDefault(); void saveRecord(); }} className={master.form}><fieldset disabled={busy}>
+{feedbackError && <p className={admin.error} role="alert">{feedbackError}</p>}
+              <div className={master.formGrid}>
+                <label style={{display: 'grid', gap: 8}}><span>Leave category name</span><input ref={leaveCategoryNameInputRef} placeholder="Name" value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} style={{ padding: '10px 12px', borderRadius: 10, border: getFieldBorder(Boolean(formErrors.name)) }} />
+                  {formErrors.name && <small style={inlineFieldErrorStyle}>{formErrors.name}</small>}</label>
+                <label style={{display: 'grid', gap: 8}}><span>Designation</span><select
                   value={form.staffCategory}
                   onChange={(event) => setForm((current) => ({ ...current, staffCategory: event.target.value }))}
                   style={{ padding: '10px 12px', borderRadius: 10, border: getFieldBorder(Boolean(formErrors.staffCategory)), background: '#fff' }}
@@ -399,8 +414,8 @@ export default function LeaveCategoriesMasterDataPage() {
                   {designationOptions.map((designation) => (
                     <option key={designation.value} value={designation.value}>{designation.label}</option>
                   ))}
-                </select>
-                <select
+                </select></label>
+                <label style={{display: 'grid', gap: 8}}><span>Store</span><select
                   value={form.storeId}
                   onChange={(event) => setForm((current) => ({ ...current, storeId: event.target.value }))}
                   disabled={Boolean(assignedStoreId)}
@@ -410,15 +425,11 @@ export default function LeaveCategoriesMasterDataPage() {
                   {storeOptions.map((store) => (
                     <option key={store.value} value={store.value}>{store.label}</option>
                   ))}
-                </select>
-                <div style={{ display: 'grid', gap: 4 }}>
-                  <input type="number" min={0} max={366} value={form.annualAllowanceDays} onChange={(event) => setForm((current) => ({ ...current, annualAllowanceDays: Number(event.target.value) }))} style={{ padding: '10px 12px', borderRadius: 10, border: getFieldBorder(Boolean(formErrors.annualAllowanceDays)) }} />
-                  {formErrors.annualAllowanceDays && <small style={inlineFieldErrorStyle}>{formErrors.annualAllowanceDays}</small>}
-                </div>
-                <div style={{ display: 'grid', gap: 4 }}>
-                  <input type="number" min={0} max={366} value={form.maxCarryForwardDays} onChange={(event) => setForm((current) => ({ ...current, maxCarryForwardDays: Number(event.target.value) }))} style={{ padding: '10px 12px', borderRadius: 10, border: getFieldBorder(Boolean(formErrors.maxCarryForwardDays)) }} />
-                  {formErrors.maxCarryForwardDays && <small style={inlineFieldErrorStyle}>{formErrors.maxCarryForwardDays}</small>}
-                </div>
+                </select></label>
+                <label style={{display: 'grid', gap: 8}}><span>Annual allowance (days)</span><input type="number" min={0} max={366} value={form.annualAllowanceDays} onChange={(event) => setForm((current) => ({ ...current, annualAllowanceDays: Number(event.target.value) }))} style={{ padding: '10px 12px', borderRadius: 10, border: getFieldBorder(Boolean(formErrors.annualAllowanceDays)) }} />
+                  {formErrors.annualAllowanceDays && <small style={inlineFieldErrorStyle}>{formErrors.annualAllowanceDays}</small>}</label>
+                <label style={{display: 'grid', gap: 8}}><span>Maximum carry-forward (days)</span><input disabled={!form.carryForwardAllowed} type="number" min={0} max={366} value={form.maxCarryForwardDays} onChange={(event) => setForm((current) => ({ ...current, maxCarryForwardDays: Number(event.target.value) }))} style={{ padding: '10px 12px', borderRadius: 10, border: getFieldBorder(Boolean(formErrors.maxCarryForwardDays)) }} />
+                  {formErrors.maxCarryForwardDays && <small style={inlineFieldErrorStyle}>{formErrors.maxCarryForwardDays}</small>}</label>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700, color: '#334155' }}>
                   <input type="checkbox" checked={form.carryForwardAllowed} onChange={(event) => setForm((current) => ({ ...current, carryForwardAllowed: event.target.checked }))} />
                   Carry forward allowed
@@ -443,38 +454,22 @@ export default function LeaveCategoriesMasterDataPage() {
                 <button type="button" onClick={() => applySeedValues('PRIVILEGE')} style={{ borderRadius: 999, border: '1px solid rgba(148,163,184,.35)', background: '#fff', padding: '6px 10px', cursor: 'pointer' }}>Privilege</button>
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 16 }}>
-                <button type="button" onClick={closeForm} className="btn btn-secondary">Cancel</button>
-                <button type="submit" className="btn btn-primary">{editingId ? 'Update Leave Category' : 'Create Leave Category'}</button>
+              <div className={master.formFooter}>
+                <button type="button" onClick={closeForm} className={admin.secondary}>Cancel</button>
+                <button type="submit" className={admin.primary}>{editingId ? 'Update Leave Category' : 'Create Leave Category'}</button>
               </div>
-            </form>
-          </div>
-        </div>
+            </fieldset></form>
+        </AdminDialog>
       )}
 
-      <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-        <div style={{ padding: 20, borderBottom: '1px solid rgba(148,163,184,0.18)', display: 'grid', gap: 14 }}>
-          <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-            <button
-              type="button"
-              onClick={() => {
-                resetForm();
-                setIsFormOpen(true);
-                window.requestAnimationFrame(() => {
-                  leaveCategoryNameInputRef.current?.focus();
-                });
-              }}
-              className="btn btn-primary"
-            >
-              Create Leave Category
-            </button>
-          </div>
-        </div>
-
+      <div className={master.tablePanel}>
+<div className={admin.panelHeader}><div><h2>Leave categories</h2><p>Manage leave allowances, carry-forward limits, and eligibility.</p></div></div>
+        <div className={admin.filters}><input aria-label="Search leave categories" placeholder="Search name, code, or designation" value={search} onChange={e => setSearch(e.target.value)} /><label>Status<select value={status} onChange={e => setStatus(e.target.value)}><option value="all">All statuses</option><option value="active">Active</option><option value="inactive">Inactive</option></select></label></div>
+        <p className={admin.count}>{filteredRecords.length} of {records.length} categories shown</p>
         {isLoading ? (
           <div style={{ padding: 20, color: '#64748b' }}>Loading leave categories...</div>
         ) : (
-          <table className="table" style={{ minWidth: 980 }}>
+          <table className={admin.table} style={{ minWidth: 980 }}>
             <thead>
               <tr>
                 <th>Name</th>
@@ -487,7 +482,7 @@ export default function LeaveCategoriesMasterDataPage() {
               </tr>
             </thead>
             <tbody>
-              {records.length > 0 ? records.map((record) => (
+              {filteredRecords.length > 0 ? filteredRecords.map((record) => (
                 <tr key={record._id}>
                   <td>{record.name}</td>
                   <td>{designationLabelById.get(record.staffCategory) ?? record.staffCategory}</td>
@@ -556,6 +551,6 @@ export default function LeaveCategoriesMasterDataPage() {
           </table>
         )}
       </div>
-    </main>
+    </MasterDataWorkspace>
   );
 }

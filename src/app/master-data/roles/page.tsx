@@ -3,7 +3,11 @@
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ConfirmDialog, FeedbackToast } from '@/components/Feedback';
-import { apiFetchWithRetry } from '@/lib/api';
+import MasterDataWorkspace from '@/components/master-data/MasterDataWorkspace';
+import { AdminDialog } from '@/components/admin/AdminWorkspace';
+import admin from '@/components/admin/admin.module.css';
+import master from '@/components/master-data/master-data.module.css';
+import { apiFetch, apiFetchWithRetry } from '@/lib/api';
 import { getFieldBorder, inlineFieldErrorStyle } from '@/lib/form-ui';
 import { hasITAdminAccess } from '@/lib/utils';
 
@@ -120,6 +124,15 @@ const iconButtonStyle: React.CSSProperties = {
 };
 
 export default function RolesMasterDataPage() {
+  const mutationLock = useRef(false);
+  const [feedbackError, setFeedbackError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const runMutation = async (operation: () => Promise<void>) => {
+    if (mutationLock.current) return;
+    mutationLock.current = true; setBusy(true); setFeedbackError('');
+    try { await operation(); } finally { mutationLock.current = false; setBusy(false); }
+  };
+
   const router = useRouter();
   const roleLabelInputRef = useRef<HTMLInputElement | null>(null);
   const [roles, setRoles] = useState<RoleRecord[]>([]);
@@ -136,6 +149,7 @@ export default function RolesMasterDataPage() {
   const [formErrors, setFormErrors] = useState<RoleFormErrors>({});
 
   const showToast = useCallback((description: string, type: 'success' | 'error' = 'success', title?: string) => {
+    setFeedbackError(type === 'error' ? description : '');
     setToast({
       type,
       title: title ?? (type === 'success' ? 'Success' : 'Error'),
@@ -144,6 +158,7 @@ export default function RolesMasterDataPage() {
   }, []);
 
   const loadData = useCallback(async () => {
+    setFeedbackError('');
     setLoading(true);
 
     try {
@@ -194,6 +209,7 @@ export default function RolesMasterDataPage() {
   };
 
   const resetRoleForm = () => {
+    setFeedbackError('');
     setEditingRoleCode(null);
     setRoleForm(emptyRoleForm);
     setFormErrors({});
@@ -208,7 +224,8 @@ export default function RolesMasterDataPage() {
     setDeleteCandidate(null);
   };
 
-  const saveRole = async () => {
+  const saveRole = () => runMutation(() => saveRoleRequest());
+  const saveRoleRequest = async () => {
     const nextErrors: RoleFormErrors = {};
 
     if (!roleForm.label.trim()) {
@@ -251,7 +268,7 @@ export default function RolesMasterDataPage() {
         includeInRoleAccessMatrix: Boolean(roleForm.includeInRoleAccessMatrix),
       };
 
-      await apiFetchWithRetry('/master-data/roles', {
+      await apiFetch('/master-data/roles', {
         method: 'PUT',
         body: JSON.stringify(payload),
       });
@@ -264,9 +281,10 @@ export default function RolesMasterDataPage() {
     }
   };
 
-  const deleteRole = async (roleCode: string) => {
+  const deleteRole = (roleCode: string) => runMutation(() => deleteRoleRequest(roleCode));
+  const deleteRoleRequest = async (roleCode: string) => {
     try {
-      await apiFetchWithRetry(`/master-data/roles/${roleCode}`, { method: 'DELETE' });
+      await apiFetch(`/master-data/roles/${roleCode}`, { method: 'DELETE' });
       if (editingRoleCode === roleCode) {
         resetRoleForm();
       }
@@ -346,33 +364,24 @@ export default function RolesMasterDataPage() {
   };
 
   return (
-    <main className="portal-page">
+    <MasterDataWorkspace actions={<><button className={admin.secondary} disabled={loading || busy} onClick={() => void loadData()}>Refresh</button><button className={admin.primary} disabled={loading || busy} onClick={openCreateRole}>+ Add role</button></>}>
+      {feedbackError && !isFormOpen && <p className={admin.error} role="alert">{feedbackError}</p>}
       {toast && <FeedbackToast title={toast.title} description={toast.description} type={toast.type} onClose={() => setToast(null)} durationMs={3200} />}
 
       <div style={{ display: 'grid', gap: 20 }}>
         {isFormOpen && (
-          <div
-            role="presentation"
-            onClick={closeRoleForm}
-            style={{ position: 'fixed', inset: 0, zIndex: 70, background: 'rgba(15,23,42,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}
-          >
-            <div
-              role="dialog"
-              aria-modal="true"
-              aria-label={editingRoleCode ? 'Edit role' : 'Create role'}
-              onClick={(event) => event.stopPropagation()}
-              style={{ width: 'min(920px, 100%)', maxHeight: '90vh', overflowY: 'auto', background: '#f8fafc', borderRadius: 18, boxShadow: '0 28px 80px rgba(15, 23, 42, 0.28)', border: '1px solid rgba(148,163,184,0.2)' }}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '18px 22px', borderBottom: '1px solid rgba(148,163,184,0.18)' }}>
+          <AdminDialog title="Roles" busy={busy} onClose={closeRoleForm}>
+            <div className={admin.dialogHeader}>
                 <div>
                   <h2 style={{ margin: 0, fontSize: 26, letterSpacing: '-0.03em' }}>{editingRoleCode ? 'Edit role' : 'Add new role'}</h2>
-                  <p style={{ margin: '6px 0 0', color: '#64748b', fontSize: 13 }}>Keep the form open in a modal while adding or updating the role.</p>
+                  <p style={{ margin: '6px 0 0', color: '#64748b', fontSize: 13 }}>Set the role’s purpose, scope, and access level.</p>
                 </div>
-                <button type="button" aria-label="Close dialog" title="Close dialog" onClick={closeRoleForm} style={{ border: 'none', background: 'transparent', fontSize: 28, cursor: 'pointer', color: '#475569', lineHeight: 1, padding: 0 }}>×</button>
+                <button type="button" disabled={busy} aria-label="Close dialog" title="Close dialog" onClick={closeRoleForm} style={{ border: 'none', background: 'transparent', fontSize: 28, cursor: 'pointer', color: '#475569', lineHeight: 1, padding: 0 }}>×</button>
               </div>
 
-              <form onSubmit={(event) => { event.preventDefault(); void saveRole(); }} style={{ padding: 20 }}>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14 }}>
+              <form onSubmit={(event) => { event.preventDefault(); void saveRole(); }} className={master.form}><fieldset disabled={busy}>
+{feedbackError && <p className={admin.error} role="alert">{feedbackError}</p>}
+                <div className={master.formGrid}>
                   <label style={{ display: 'grid', gap: 8 }}>
                     <span style={{ fontWeight: 700 }}>Role</span>
                     <input
@@ -447,7 +456,7 @@ export default function RolesMasterDataPage() {
                     />
                   </label>
                 </div>
-                <div style={{ marginTop: 18, display: 'flex', gap: 12, alignItems: 'center' }}>
+                <div className={master.formFooter}>
                   <button type="submit" style={{ padding: '10px 16px', background: '#111827', color: '#fff', border: 'none', borderRadius: 10, cursor: 'pointer', fontWeight: 700 }}>
                     {editingRoleCode ? 'Update role' : 'Save role'}
                   </button>
@@ -455,13 +464,13 @@ export default function RolesMasterDataPage() {
                     Cancel
                   </button>
                 </div>
-              </form>
-            </div>
-          </div>
-        )}
+              </fieldset></form>
+        </AdminDialog>
+      )}
 
-        <section className="card" style={{ padding: 18, borderRadius: 18, border: '1px solid rgba(148,163,184,0.18)', boxShadow: '0 12px 28px rgba(15,23,42,0.04)' }}>
-          <div style={{ display: 'flex', alignItems: 'end', gap: 12, flexWrap: 'wrap', marginBottom: 16 }}>
+        <section className={master.panel}>
+<div className={admin.panelHeader}><div><h2>Roles</h2><p>Define roles and how they are used across your organization.</p></div></div>
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 12, flexWrap: 'wrap', marginBottom: 16 }}>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, flex: '1 1 640px' }}>
               <label style={{ display: 'grid', gap: 8 }}>
                 <span style={{ fontWeight: 700, fontSize: 13 }}>Role search</span>
@@ -480,32 +489,20 @@ export default function RolesMasterDataPage() {
                   style={{ height: 42, padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(148,163,184,0.35)', background: 'rgba(255,255,255,0.42)' }}
                 >
                   <option value="All">All categories</option>
-                  <option value="Leadership">Leadership</option>
-                  <option value="Management">Management</option>
-                  <option value="Operations">Operations</option>
-                  <option value="Finance">Finance</option>
-                  <option value="Support">Support</option>
-                  <option value="Procurement">Procurement</option>
-                  <option value="Information technology">Information technology</option>
-                  <option value="Visual Media">Visual Media</option>
-                  <option value="Design">Design</option>
-                  <option value="Advertisemnt">Advertisemnt</option>
-                  <option value="Member">Member</option>
+                  {Array.from(new Set(roles.map(role => role.category).filter(Boolean))).sort().map(category => <option key={category} value={category}>{category}</option>)}
                 </select>
               </label>
 
             </div>
 
-            <button type="button" onClick={openCreateRole} style={{ padding: '10px 16px', background: '#111827', color: '#fff', border: 'none', borderRadius: 10, cursor: 'pointer', fontWeight: 700, marginLeft: 'auto' }}>
-              + Add role
-            </button>
+
           </div>
 
           {loading ? (
             <div>Loading...</div>
           ) : (
-            <div className="table-responsive">
-              <table className="table" style={{ minWidth: 900 }}>
+            <div className={admin.tableWrap}>
+              <table className={admin.table} style={{ minWidth: 900 }}>
                 <thead>
                   <tr>
                     <th>
@@ -578,6 +575,7 @@ export default function RolesMasterDataPage() {
         </section>
 
         <ConfirmDialog
+        isProcessing={busy}
           open={Boolean(deleteCandidate)}
           title="Delete role?"
           description={deleteCandidate ? <><strong>{deleteCandidate.label}</strong> will be removed. This role cannot be deleted if it is assigned to any designation.</> : ''}
@@ -586,6 +584,6 @@ export default function RolesMasterDataPage() {
           onConfirm={() => void confirmDeleteRole()}
         />
       </div>
-    </main>
+    </MasterDataWorkspace>
   );
 }

@@ -1,8 +1,11 @@
 'use client';
 
+import Link from 'next/link';
+import OnboardingWorkspace from '@/components/onboarding/OnboardingWorkspace';
+import admin from '@/components/admin/admin.module.css';
+import styles from '@/components/onboarding/onboarding.module.css';
 import { useRouter } from 'next/navigation';
-import { useEffect, useMemo, useState } from 'react';
-import { apiFetchWithRetry } from '@/lib/api';
+import { useEffect, useState } from 'react';
 import { normalizeRole } from '@/lib/utils';
 
 type WorkflowStage = {
@@ -86,12 +89,10 @@ const roleWorkflows: Record<string, WorkflowDefinition> = {
   },
 };
 
-const defaultRoleOptions = Object.keys(roleWorkflows).filter((role) => role !== 'IT Admin');
 
 export default function WorkflowPage() {
   const router = useRouter();
   const [selectedRole, setSelectedRole] = useState('Team Member');
-  const [roleOptions, setRoleOptions] = useState<string[]>(defaultRoleOptions);
 
   useEffect(() => {
     const storedUser = window.sessionStorage.getItem('loop_admin_user');
@@ -111,86 +112,10 @@ export default function WorkflowPage() {
     }
   }, [router]);
 
-  useEffect(() => {
-    const loadRoles = async () => {
-      try {
-        const roles = await apiFetchWithRetry<Array<{ value?: string; label?: string }>>('/auth/roles');
-        const options = Array.from(
-          new Set(
-            (Array.isArray(roles) ? roles : [])
-              .map((role) => normalizeRole(String(role?.value ?? role?.label ?? '').trim()))
-              .filter(Boolean),
-          ),
-        );
+  const currentWorkflow = roleWorkflows[selectedRole];
 
-        if (options.length > 0) {
-          setRoleOptions(options);
-          setSelectedRole((current) => (options.includes(current) ? current : options[0]));
-        }
-      } catch {
-        setRoleOptions(defaultRoleOptions);
-      }
-    };
-
-    loadRoles();
-  }, []);
-
-  const currentWorkflow = useMemo(() => roleWorkflows[selectedRole] ?? roleWorkflows['Team Member'], [selectedRole]);
-
-  return (
-    <main className="portal-page">
-      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 16, marginBottom: 20, flexWrap: 'wrap' }}>
-        <div style={{ flex: 1 }} />
-
-        <label style={{ display: 'grid', gap: 8, fontWeight: 700, color: '#475569', minWidth: 220 }}>
-          Role
-          <select
-            value={selectedRole}
-            onChange={(event) => setSelectedRole(event.target.value)}
-            style={{
-              padding: '12px 14px',
-              borderRadius: 12,
-              border: '1px solid rgba(148,163,184,0.32)',
-              background: '#fff',
-              color: '#0f172a',
-              fontSize: 15,
-              fontWeight: 600,
-            }}
-          >
-            {roleOptions.map((role) => (
-              <option key={role} value={role}>{role}</option>
-            ))}
-          </select>
-        </label>
-      </div>
-
-      <div className="row" style={{ marginBottom: 20 }}>
-        <div className="card" style={{ flex: '1 1 220px' }}>
-          <strong>{currentWorkflow.summary.stages}</strong>
-          <div>Approval stages</div>
-        </div>
-        <div className="card" style={{ flex: '1 1 220px' }}>
-          <strong>{currentWorkflow.summary.checkpoints}</strong>
-          <div>Review checkpoints</div>
-        </div>
-        <div className="card" style={{ flex: '1 1 220px' }}>
-          <strong>{currentWorkflow.summary.final}</strong>
-          <div>Final activation</div>
-        </div>
-      </div>
-
-      <div className="card" style={{ padding: 22 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14 }}>
-          {currentWorkflow.stages.map((step, index) => (
-            <div key={`${selectedRole}-${step.title}`} style={{ padding: 16, borderRadius: 12, border: '1px solid rgba(148,163,184,0.2)', background: '#fff' }}>
-              <strong style={{ display: 'block', marginBottom: 8 }}>{`${index + 1}. ${step.title}`}</strong>
-              <div style={{ fontWeight: 700, marginBottom: 6 }}>{step.action}</div>
-              <div style={{ fontSize: 14, color: '#475569', marginBottom: 8 }}>{step.detail}</div>
-              <div style={{ fontSize: 13, color: '#64748b' }}>{step.actor}</div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </main>
-  );
+  return <OnboardingWorkspace actions={<Link className={admin.primary} href="/users">Manage users</Link>}>
+    <section className={admin.panel}><div className={admin.panelHeader}><div><h2>Onboarding workflow guide</h2><p>Reference steps for each role. This guide does not change approval rules or applicant status.</p></div></div><div className={admin.filters}><label>Role guide<select value={selectedRole} onChange={event => setSelectedRole(event.target.value)}>{Object.keys(roleWorkflows).map(role => <option key={role} value={role}>{role}</option>)}</select></label><span className={admin.badge}>{currentWorkflow.stages.length} steps</span></div></section>
+    <section className={admin.panel}><div className={admin.panelHeader}><div><h2>{currentWorkflow.label}</h2><p>Follow the sequence from the initial request to account activation.</p></div></div><ol className={styles.steps}>{currentWorkflow.stages.map((step,index) => <li key={step.title}><span className={styles.number} aria-hidden="true">{index+1}</span><div><h3>{step.title}</h3><strong>{step.action}</strong><p>{step.detail}</p><small>Responsible: {step.actor}</small></div></li>)}</ol></section>
+  </OnboardingWorkspace>;
 }

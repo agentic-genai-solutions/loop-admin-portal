@@ -1,18 +1,16 @@
 'use client';
 
+import { onboardingNavigation } from '@/lib/onboarding-navigation';
+import { masterDataNavigation } from '@/lib/master-data-navigation';
+import { workforceNavigation } from '@/lib/workforce-navigation';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
+import { adminNavigation } from '@/lib/admin-navigation';
+import { financeNavigation } from '@/lib/finance-navigation';
 import { normalizeRole } from '@/lib/utils';
 
-const navItems = [
-  { href: '/leave', label: 'Leave Requests' },
-  { href: '/employees', label: 'Employees' },
-  { href: '/directors', label: 'Directors' },
-  { href: '/messages', label: 'Messages' },
-  { href: '/reports', label: 'Reports' },
-  { href: '/stores', label: 'Store Management' },
-];
+const navItems = adminNavigation;
 
 function resolveDisplayName(parsedUser: Record<string, any> | null | undefined) {
   const directName = [parsedUser?.title, parsedUser?.firstName, parsedUser?.lastName].filter(Boolean).join(' ');
@@ -37,6 +35,7 @@ export default function Sidebar() {
   const [userStore, setUserStore] = useState('');
   const [isAdminOpen, setIsAdminOpen] = useState(false);
   const [isIncentivesOpen, setIsIncentivesOpen] = useState(false);
+  const [isFinanceOpen, setIsFinanceOpen] = useState(false);
   const [isWorkforceOpen, setIsWorkforceOpen] = useState(false);
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
   const [isMasterDataOpen, setIsMasterDataOpen] = useState(false);
@@ -56,6 +55,10 @@ export default function Sidebar() {
   useEffect(() => {
     const isCurrentIncentivesRoute = pathname === '/incentives' || pathname.startsWith('/incentives/');
     setIsIncentivesOpen(isCurrentIncentivesRoute);
+  }, [pathname]);
+
+  useEffect(() => {
+    setIsFinanceOpen(pathname === '/finance' || pathname.startsWith('/finance/'));
   }, [pathname]);
 
   useEffect(() => {
@@ -171,9 +174,20 @@ export default function Sidebar() {
           )}
         </div>
 
-        <Link href="/finance" className={`nav-item ${isActiveLink('/finance') ? 'active' : ''}`} aria-current={isActiveLink('/finance') ? 'page' : undefined} onClick={() => setIsOpen(false)}>
-          Finance
-        </Link>
+        <div className="nav-group">
+          <button type="button" className={`nav-group-toggle ${isActiveLink('/finance') ? 'active' : ''}`}
+            onClick={() => {
+              if (!isFinanceOpen && !isActiveLink('/finance')) router.push('/finance');
+              setIsFinanceOpen(open => !open);
+            }} aria-expanded={isFinanceOpen} aria-controls="finance-submenu">
+            <span>Finance</span><span className="nav-group-caret" aria-hidden="true">{isFinanceOpen ? '▾' : '▸'}</span>
+          </button>
+          {isFinanceOpen && <div id="finance-submenu" className="nav-group-children">
+            {financeNavigation.map(item => <Link key={item.href} href={item.href}
+              className={`nav-item nav-item-sub ${pathname === item.href ? 'active' : ''}`}
+              aria-current={pathname === item.href ? 'page' : undefined} onClick={() => setIsOpen(false)}>{item.label}</Link>)}
+          </div>}
+        </div>
 
         {canViewAdmin && (
           <div className="nav-group">
@@ -200,6 +214,7 @@ export default function Sidebar() {
                     key={item.href}
                     href={item.href}
                     className={`nav-item nav-item-sub ${isActiveLink(item.href) ? 'active' : ''}`}
+                    aria-current={isActiveLink(item.href) ? 'page' : undefined}
                     onClick={() => setIsOpen(false)}
                   >
                     {item.label}
@@ -230,21 +245,7 @@ export default function Sidebar() {
 
             {isWorkforceOpen && (
               <div className="nav-group-children">
-                <Link
-                  href="/attendance"
-                  className={`nav-item nav-item-sub ${pathname === '/attendance' ? 'active' : ''}`}
-                  onClick={() => setIsOpen(false)}
-                >
-                  Attendance
-                </Link>
-                <Link href="/attendance/timing" className={`nav-item nav-item-sub ${pathname === '/attendance/timing' ? 'active' : ''}`} onClick={() => setIsOpen(false)}>Timing Rules</Link>
-                <Link
-                  href="/roster"
-                  className={`nav-item nav-item-sub ${isActiveLink('/roster') ? 'active' : ''}`}
-                  onClick={() => setIsOpen(false)}
-                >
-                  Roster
-                </Link>
+                {workforceNavigation.map(item => <Link key={item.href} href={item.href} className={`nav-item nav-item-sub ${pathname === item.href ? 'active' : ''}`} aria-current={pathname === item.href ? 'page' : undefined} onClick={() => setIsOpen(false)}>{item.label}</Link>)}
               </div>
             )}
           </div>
@@ -270,41 +271,7 @@ export default function Sidebar() {
 
             {isMasterDataOpen && (
               <div className="nav-group-children">
-                <Link
-                  href="/master-data/roles"
-                  className={`nav-item nav-item-sub ${isActiveLink('/master-data/roles') ? 'active' : ''}`}
-                  onClick={() => setIsOpen(false)}
-                >
-                  Roles
-                </Link>
-                <Link
-                  href="/master-data/designations"
-                  className={`nav-item nav-item-sub ${isActiveLink('/master-data/designations') ? 'active' : ''}`}
-                  onClick={() => setIsOpen(false)}
-                >
-                  Designations
-                </Link>
-                <Link
-                  href="/master-data/access-delegation"
-                  className={`nav-item nav-item-sub ${isActiveLink('/master-data/access-delegation') ? 'active' : ''}`}
-                  onClick={() => setIsOpen(false)}
-                >
-                  Access Delegation
-                </Link>
-                <Link
-                  href="/master-data/schedules"
-                  className={`nav-item nav-item-sub ${isActiveLink('/master-data/schedules') ? 'active' : ''}`}
-                  onClick={() => setIsOpen(false)}
-                >
-                  Schedules
-                </Link>
-                <Link
-                  href="/master-data/leave-categories"
-                  className={`nav-item nav-item-sub ${isActiveLink('/master-data/leave-categories') ? 'active' : ''}`}
-                  onClick={() => setIsOpen(false)}
-                >
-                  Leave Categories
-                </Link>
+                {masterDataNavigation.map(item => <Link key={item.href} href={item.href} className={`nav-item nav-item-sub ${pathname === item.href ? 'active' : ''}`} aria-current={pathname === item.href ? 'page' : undefined} onClick={() => setIsOpen(false)}>{item.label}</Link>)}
               </div>
             )}
           </div>
@@ -330,22 +297,7 @@ export default function Sidebar() {
 
             {isOnboardingOpen && (
               <div className="nav-group-children">
-                <Link
-                  href="/users"
-                  className={`nav-item nav-item-sub ${isActiveLink('/users') ? 'active' : ''}`}
-                  onClick={() => setIsOpen(false)}
-                >
-                  Users
-                </Link>
-                {canViewWorkflow && (
-                  <Link
-                    href="/workflow"
-                    className={`nav-item nav-item-sub ${isActiveLink('/workflow') ? 'active' : ''}`}
-                    onClick={() => setIsOpen(false)}
-                  >
-                    Workflow
-                  </Link>
-                )}
+                {onboardingNavigation.filter(item => item.href !== '/workflow' || canViewWorkflow).map(item => <Link key={item.href} href={item.href} className={`nav-item nav-item-sub ${pathname === item.href ? 'active' : ''}`} aria-current={pathname === item.href ? 'page' : undefined} onClick={() => setIsOpen(false)}>{item.label}</Link>)}
               </div>
             )}
           </div>

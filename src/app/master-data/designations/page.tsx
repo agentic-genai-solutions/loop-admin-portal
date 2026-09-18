@@ -3,7 +3,11 @@
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ConfirmDialog, FeedbackToast } from '@/components/Feedback';
-import { apiFetchWithRetry } from '@/lib/api';
+import MasterDataWorkspace from '@/components/master-data/MasterDataWorkspace';
+import { AdminDialog } from '@/components/admin/AdminWorkspace';
+import admin from '@/components/admin/admin.module.css';
+import master from '@/components/master-data/master-data.module.css';
+import { apiFetch, apiFetchWithRetry } from '@/lib/api';
 import { getFieldBorder, inlineFieldErrorStyle } from '@/lib/form-ui';
 
 const emptyDesignationForm = {
@@ -52,6 +56,15 @@ const iconButtonStyle: React.CSSProperties = {
 };
 
 export default function DesignationsMasterDataPage() {
+  const mutationLock = useRef(false);
+  const [feedbackError, setFeedbackError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const runMutation = async (operation: () => Promise<void>) => {
+    if (mutationLock.current) return;
+    mutationLock.current = true; setBusy(true); setFeedbackError('');
+    try { await operation(); } finally { mutationLock.current = false; setBusy(false); }
+  };
+
   const router = useRouter();
   const designationLabelInputRef = useRef<HTMLInputElement | null>(null);
   const [designations, setDesignations] = useState<DesignationRecord[]>([]);
@@ -72,6 +85,7 @@ export default function DesignationsMasterDataPage() {
   const [formErrors, setFormErrors] = useState<DesignationFormErrors>({});
 
   const showToast = useCallback((description: string, type: 'success' | 'error' = 'success', title?: string) => {
+    setFeedbackError(type === 'error' ? description : '');
     setToast({
       type,
       title: title ?? (type === 'success' ? 'Success' : 'Error'),
@@ -80,6 +94,7 @@ export default function DesignationsMasterDataPage() {
   }, []);
 
   const loadData = useCallback(async () => {
+    setFeedbackError('');
     setLoading(true);
 
     try {
@@ -152,6 +167,7 @@ export default function DesignationsMasterDataPage() {
   };
 
   const resetDesignationForm = () => {
+    setFeedbackError('');
     setEditingDesignationCode(null);
     setDesignationForm(emptyDesignationForm);
     setRoleSearch('');
@@ -163,7 +179,8 @@ export default function DesignationsMasterDataPage() {
     resetDesignationForm();
   };
 
-  const saveDesignation = async () => {
+  const saveDesignation = () => runMutation(() => saveDesignationRequest());
+  const saveDesignationRequest = async () => {
     const nextErrors: DesignationFormErrors = {};
 
     if (!designationForm.label.trim()) {
@@ -191,7 +208,7 @@ export default function DesignationsMasterDataPage() {
         roleIds: [...new Set(selectedRoleIds)],
       };
 
-      await apiFetchWithRetry('/master-data/designations', {
+      await apiFetch('/master-data/designations', {
         method: 'PUT',
         body: JSON.stringify(payload),
       });
@@ -204,9 +221,10 @@ export default function DesignationsMasterDataPage() {
     }
   };
 
-  const deleteDesignation = async (code: string) => {
+  const deleteDesignation = (code: string) => runMutation(() => deleteDesignationRequest(code));
+  const deleteDesignationRequest = async (code: string) => {
     try {
-      await apiFetchWithRetry(`/master-data/designations/${code}`, { method: 'DELETE' });
+      await apiFetch(`/master-data/designations/${code}`, { method: 'DELETE' });
       if (editingDesignationCode === code) {
         resetDesignationForm();
       }
@@ -330,33 +348,24 @@ export default function DesignationsMasterDataPage() {
   };
 
   return (
-    <main className="portal-page">
+    <MasterDataWorkspace actions={<><button className={admin.secondary} disabled={loading || busy} onClick={() => void loadData()}>Refresh</button><button className={admin.primary} disabled={loading || busy} onClick={openCreateDesignation}>+ Add designation</button></>}>
+      {feedbackError && !isFormOpen && <p className={admin.error} role="alert">{feedbackError}</p>}
       {toast && <FeedbackToast title={toast.title} description={toast.description} type={toast.type} onClose={() => setToast(null)} durationMs={3200} />}
 
       <div style={{ display: 'grid', gap: 20 }}>
         {isFormOpen && (
-          <div
-            role="presentation"
-            onClick={closeDesignationForm}
-            style={{ position: 'fixed', inset: 0, zIndex: 70, background: 'rgba(15,23,42,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}
-          >
-            <div
-              role="dialog"
-              aria-modal="true"
-              aria-label={editingDesignationCode ? 'Edit designation' : 'Create designation'}
-              onClick={(event) => event.stopPropagation()}
-              style={{ width: 'min(920px, 100%)', maxHeight: '90vh', overflowY: 'auto', background: '#f8fafc', borderRadius: 18, boxShadow: '0 28px 80px rgba(15, 23, 42, 0.28)', border: '1px solid rgba(148,163,184,0.2)' }}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '18px 22px', borderBottom: '1px solid rgba(148,163,184,0.18)' }}>
+          <AdminDialog title="Designations" busy={busy} onClose={closeDesignationForm}>
+            <div className={admin.dialogHeader}>
                 <div>
                   <h2 style={{ margin: 0, fontSize: 26, letterSpacing: '-0.03em' }}>{editingDesignationCode ? 'Edit designation' : 'Add new designation'}</h2>
-                  <p style={{ margin: '6px 0 0', color: '#64748b', fontSize: 13 }}>Keep the form in a modal while adding or updating the designation.</p>
+                  <p style={{ margin: '6px 0 0', color: '#64748b', fontSize: 13 }}>Choose the roles that belong to this job title.</p>
                 </div>
-                <button type="button" aria-label="Close dialog" title="Close dialog" onClick={closeDesignationForm} style={{ border: 'none', background: 'transparent', fontSize: 28, cursor: 'pointer', color: '#475569', lineHeight: 1, padding: 0 }}>×</button>
+                <button type="button" disabled={busy} aria-label="Close dialog" title="Close dialog" onClick={closeDesignationForm} style={{ border: 'none', background: 'transparent', fontSize: 28, cursor: 'pointer', color: '#475569', lineHeight: 1, padding: 0 }}>×</button>
               </div>
 
-              <form onSubmit={(event) => { event.preventDefault(); void saveDesignation(); }} style={{ padding: 20 }}>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14 }}>
+              <form onSubmit={(event) => { event.preventDefault(); void saveDesignation(); }} className={master.form}><fieldset disabled={busy}>
+{feedbackError && <p className={admin.error} role="alert">{feedbackError}</p>}
+                <div className={master.formGrid}>
                   <label style={{ display: 'grid', gap: 8 }}>
                     <span style={{ fontWeight: 700 }}>Designation</span>
                     <input
@@ -447,7 +456,7 @@ export default function DesignationsMasterDataPage() {
                     {formErrors.roleIds && <small style={inlineFieldErrorStyle}>{formErrors.roleIds}</small>}
                   </label>
                 </div>
-                <div style={{ marginTop: 18, display: 'flex', gap: 12, alignItems: 'center' }}>
+                <div className={master.formFooter}>
                   <button type="submit" style={{ padding: '10px 16px', background: '#111827', color: '#fff', border: 'none', borderRadius: 10, cursor: 'pointer', fontWeight: 700 }}>
                     {editingDesignationCode ? 'Update designation' : 'Save designation'}
                   </button>
@@ -455,13 +464,13 @@ export default function DesignationsMasterDataPage() {
                     Cancel
                   </button>
                 </div>
-              </form>
-            </div>
-          </div>
-        )}
+              </fieldset></form>
+        </AdminDialog>
+      )}
 
-        <section className="card" style={{ padding: 18, borderRadius: 18, border: '1px solid rgba(148,163,184,0.18)', boxShadow: '0 12px 28px rgba(15,23,42,0.04)' }}>
-          <div style={{ display: 'flex', alignItems: 'end', gap: 24, flexWrap: 'wrap', marginBottom: 16 }}>
+        <section className={master.panel}>
+<div className={admin.panelHeader}><div><h2>Designations</h2><p>Connect job titles to the roles employees need.</p></div></div>
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 24, flexWrap: 'wrap', marginBottom: 16 }}>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 180px), 1fr))', gap: 12, flex: '1 1 640px' }}>
               <label style={{ display: 'grid', gap: 8 }}>
                 <span style={{ fontWeight: 700, fontSize: 13 }}>Designation search</span>
@@ -490,16 +499,14 @@ export default function DesignationsMasterDataPage() {
 
             </div>
 
-            <button type="button" onClick={openCreateDesignation} style={{ padding: '10px 16px', background: '#111827', color: '#fff', border: 'none', borderRadius: 10, cursor: 'pointer', fontWeight: 700, marginLeft: 'auto' }}>
-              + Add designation
-            </button>
+
           </div>
 
           {loading ? (
             <div>Loading...</div>
           ) : (
-            <div className="table-responsive">
-              <table className="table" style={{ minWidth: 820 }}>
+            <div className={admin.tableWrap}>
+              <table className={admin.table} style={{ minWidth: 820 }}>
                 <thead>
                   <tr>
                     <th>
@@ -572,6 +579,7 @@ export default function DesignationsMasterDataPage() {
         </section>
 
         <ConfirmDialog
+        isProcessing={busy}
           open={Boolean(pendingDeleteDesignation)}
           title="Delete designation?"
           description={pendingDeleteDesignation ? <><strong>{pendingDeleteDesignation.label}</strong> will be removed. This action cannot be undone.</> : ''}
@@ -580,6 +588,6 @@ export default function DesignationsMasterDataPage() {
           onConfirm={() => void confirmDeleteDesignation()}
         />
       </div>
-    </main>
+    </MasterDataWorkspace>
   );
 }

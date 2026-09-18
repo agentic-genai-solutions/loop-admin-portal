@@ -1,12 +1,16 @@
 'use client';
 
+import { storeCountries } from '@/lib/store-currency';
+import AdminWorkspace, { AdminDialog } from '@/components/admin/AdminWorkspace';
+import adminStyles from '@/components/admin/admin.module.css';
+
 import AttendancePolicyEditor from '@/components/AttendancePolicyEditor';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ConfirmDialog, FeedbackToast } from '@/components/Feedback';
 import { EmptyState, TableSkeleton } from '@/components/Loaders';
 import { fetchStores } from '@/lib/admin-data';
-import { apiFetchWithRetry } from '@/lib/api';
+import { apiFetch, apiFetchWithRetry } from '@/lib/api';
 import { hasITAdminAccess } from '@/lib/utils';
 
 type Store = {
@@ -22,12 +26,14 @@ type Store = {
   latitude?: number;
   longitude?: number;
   radiusMeters?: number;
+  countryCode?: string;
   locationName?: string;
   isDeleted: boolean;
 };
 type SelectOption = { id: string; value: string; label: string };
 type StoreOptionInput = string | SelectOption | null | undefined;
 type StoreFormState = {
+  countryCode: string;
   name: string;
   locality: string;
   city: string;
@@ -72,6 +78,7 @@ const storeStatusOptions: SelectOption[] = [
 ];
 
 const emptyStoreForm: StoreFormState = {
+  countryCode: 'IN',
   name: '',
   locality: '',
   city: '',
@@ -94,8 +101,8 @@ const validateStoreForm = (values: StoreFormState): StoreFormErrors => {
   if (!values.city.trim()) errors.city = 'City is required.';
   if (!values.district.trim()) errors.district = 'District is required.';
   if (!values.pinCode.trim()) {
-    errors.pinCode = 'PIN code is required.';
-  } else if (!/^\d{6}$/.test(values.pinCode.trim())) {
+    errors.pinCode = 'Postal code is required (use N/A where not applicable).';
+  } else if (values.countryCode === 'IN' && !/^\d{6}$/.test(values.pinCode.trim())) {
     errors.pinCode = 'PIN code must be 6 digits.';
   }
   if (!values.localBody.trim()) errors.localBody = 'Local body is required.';
@@ -130,6 +137,8 @@ export default function StoresPage() {
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [editingId, setEditingId] = useState<string | number | null>(null);
   const [showStoreModal, setShowStoreModal] = useState(false);
+  const saveLock = useRef(false);
+  const deleteLock = useRef(false);
   const [pendingDeleteStore, setPendingDeleteStore] = useState<(typeof initialStores)[number] | null>(null);
   const [isDeletingStore, setIsDeletingStore] = useState(false);
   const [isSavingStore, setIsSavingStore] = useState(false);
@@ -238,6 +247,8 @@ export default function StoresPage() {
         ? payload?.results?.[0]?.formatted_address
         : payload?.display_name;
 
+      const countryCode = String(apiKey ? payload?.results?.[0]?.address_components?.find((part: {types?: string[]}) => part.types?.includes('country'))?.short_name : payload?.address?.country_code || '').toUpperCase();
+      if (storeCountries.some(country => country.code === countryCode)) setForm(current => ({...current,countryCode}));
       const safeName = typeof addressName === 'string' && addressName.trim() ? addressName.trim() : '';
       if (safeName) {
         setIsSuggestionSelected(true);
@@ -290,11 +301,13 @@ export default function StoresPage() {
 
       const autocomplete = new (window as any).google.maps.places.Autocomplete(input, {
         types: ['geocode', 'establishment'],
-        fields: ['formatted_address', 'geometry', 'name', 'place_id'],
+        fields: ['formatted_address', 'geometry', 'name', 'place_id', 'address_components'],
       });
 
       autocomplete.addListener('place_changed', () => {
         const place = autocomplete.getPlace();
+        const countryCode = place?.address_components?.find((part: {types?: string[]}) => part.types?.includes('country'))?.short_name;
+        if (storeCountries.some(country => country.code === countryCode)) setForm(current => ({...current,countryCode}));
         const locationName = place?.formatted_address || place?.name || '';
         const lat = place?.geometry?.location?.lat?.();
         const lng = place?.geometry?.location?.lng?.();
@@ -494,6 +507,7 @@ export default function StoresPage() {
   }, [loadStores]);
 
   const handleSubmit = async () => {
+    if (saveLock.current) return;
     const nextErrors = validateStoreForm(form);
     setFormErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) {
@@ -524,6 +538,7 @@ export default function StoresPage() {
 
     const normalizedStore = {
       name: form.name.trim(),
+      countryCode: form.countryCode,
       locality: form.locality.trim(),
       city: form.city.trim(),
       district: form.district.trim(),
@@ -537,6 +552,7 @@ export default function StoresPage() {
       status: nextStatus,
     };
 
+    saveLock.current = true;
     setIsSavingStore(true);
 
     try {
@@ -548,7 +564,7 @@ export default function StoresPage() {
           return;
         }
 
-        await apiFetchWithRetry(`/stores/${encodeURIComponent(storeId)}`, {
+        await apiFetch(`/stores/${encodeURIComponent(storeId)}`, {
           method: 'PATCH',
           body: JSON.stringify(normalizedStore),
         });
@@ -557,7 +573,7 @@ export default function StoresPage() {
 
         showToast('Store updated successfully.', 'success');
       } else {
-        await apiFetchWithRetry('/stores', {
+        await apiFetch('/stores', {
           method: 'POST',
           body: JSON.stringify(normalizedStore),
         });
@@ -573,6 +589,7 @@ export default function StoresPage() {
     } catch {
       showToast(editingId !== null ? 'Failed to update store. Please try again.' : 'Failed to add store. Please try again.', 'error');
     } finally {
+      saveLock.current = false;
       setIsSavingStore(false);
     }
   };
@@ -581,6 +598,7 @@ export default function StoresPage() {
     setEditingId(store.id);
     setForm({
       name: store.name,
+      countryCode: store.countryCode || 'IN',
       locality: store.locality ?? '',
       city: store.city,
       district: store.district ?? '',
@@ -602,6 +620,7 @@ export default function StoresPage() {
   };
 
   const confirmDeleteStore = async () => {
+    if (deleteLock.current) return;
     if (!pendingDeleteStore) {
       showToast('No store selected for deletion.', 'error', 'Delete failed');
       return;
@@ -609,6 +628,7 @@ export default function StoresPage() {
 
     const deletedStoreName = pendingDeleteStore.name;
 
+    deleteLock.current = true;
     setIsDeletingStore(true);
 
     try {
@@ -619,7 +639,7 @@ export default function StoresPage() {
         return;
       }
 
-      await apiFetchWithRetry(`/stores/${encodeURIComponent(storeId)}`, {
+      await apiFetch(`/stores/${encodeURIComponent(storeId)}`, {
         method: 'DELETE',
       });
 
@@ -630,12 +650,13 @@ export default function StoresPage() {
     } catch {
       showToast('Failed to delete store. Please try again.', 'error', 'Delete failed');
     } finally {
+      deleteLock.current = false;
       setIsDeletingStore(false);
     }
   };
 
   return (
-    <main className="portal-page">
+    <AdminWorkspace actions={<><button className={adminStyles.secondary} disabled={isLoading} onClick={() => void loadStores()}>Refresh</button><button className={adminStyles.primary} onClick={() => { setEditingId(null); setForm({ ...emptyStoreForm }); setFormErrors({}); setToast(null); setShowStoreModal(true); }}>+ Add store</button></>}>
       {toast && <FeedbackToast title={toast.title} description={toast.description} type={toast.type} onClose={() => setToast(null)} durationMs={2800} />}
       <ConfirmDialog
         open={Boolean(pendingDeleteStore)}
@@ -648,20 +669,21 @@ export default function StoresPage() {
       />
 
       {showStoreModal && (
-        <div style={{ position: 'fixed', top: 0, right: 0, bottom: 0, width: 'min(760px, 100vw)', zIndex: 60, display: 'flex', flexDirection: 'column', background: '#f8fafc', borderLeft: '1px solid #e2e8f0', boxShadow: '-20px 0 60px rgba(15, 23, 42, 0.16)' }}>
-          <div className="card" style={{ width: '100%', height: '100vh', maxHeight: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', background: '#f8fafc', borderRadius: 0, boxShadow: 'none', border: 'none', borderLeft: '1px solid #e2e8f0' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '18px 22px 14px', borderBottom: '1px solid rgba(148,163,184,0.2)', position: 'sticky', top: 0, background: 'rgba(255,255,255,0.96)', zIndex: 1 }}>
+        <AdminDialog title={editingId ? 'Edit store' : 'Add store'} busy={isSavingStore} onClose={() => { setShowStoreModal(false); setEditingId(null); setForm({ ...emptyStoreForm }); setFormErrors({}); }}>
+            <header className={adminStyles.dialogHeader}>
               <h2 style={{ margin: 0, fontSize: 26, letterSpacing: '-0.03em' }}>{editingId ? 'Edit store' : 'Add new store'}</h2>
-              <button type="button" onClick={() => { setShowStoreModal(false); setEditingId(null); setForm({ ...emptyStoreForm }); setFormErrors({}); }} style={{ border: 'none', background: 'transparent', fontSize: 28, cursor: 'pointer', color: '#475569', lineHeight: 1, padding: 0 }}>×</button>
-            </div>
+              <button type="button" aria-label="Close store form" disabled={isSavingStore} onClick={() => { setShowStoreModal(false); setEditingId(null); setForm({ ...emptyStoreForm }); setFormErrors({}); }} style={{ border: 'none', background: 'transparent', fontSize: 28, cursor: 'pointer', color: '#475569', lineHeight: 1, padding: 0 }}>×</button>
+            </header>
 
-            <div style={{ display: 'grid', gap: 14, padding: '24px 24px 0', overflowY: 'auto', flex: 1, minHeight: 0 }}>
+            <fieldset disabled={isSavingStore} className={adminStyles.storeFields}>
+              {toast?.type === 'error' && <p className={adminStyles.error} role="alert">{toast.description}</p>}
               <label style={{ display: 'grid', gap: 8, color: '#475569', fontWeight: 700 }}>
                 Store name
                 <input value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} style={{ padding: '10px 12px', borderRadius: 10, border: `1px solid ${formErrors.name ? '#b91c1c' : 'rgba(148,163,184,0.35)'}`, background: 'rgba(255,255,255,0.42)' }} />
                 {formErrors.name && <span style={{ color: '#b91c1c', fontSize: 12, marginTop: 2 }}>{formErrors.name}</span>}
               </label>
 
+              <label style={{display:'grid',gap:8}}>Country<select value={form.countryCode} onChange={event => setForm(current => ({...current,countryCode:event.target.value}))}>{storeCountries.map(country => <option key={country.code} value={country.code}>{country.name} ({country.currency})</option>)}</select></label>
               <label style={{ display: 'grid', gap: 8, color: '#475569', fontWeight: 700 }}>
                 Locality
                 <input value={form.locality} onChange={(event) => setForm((current) => ({ ...current, locality: event.target.value }))} style={{ padding: '10px 12px', borderRadius: 10, border: `1px solid ${formErrors.locality ? '#b91c1c' : 'rgba(148,163,184,0.35)'}`, background: 'rgba(255,255,255,0.42)' }} />
@@ -782,7 +804,7 @@ export default function StoresPage() {
                 </div>
 
                 {geoError && <div style={{ color: '#b91c1c', fontSize: 12 }}>{geoError}</div>}
-                <div style={{ color: '#64748b', fontSize: 12, lineHeight: 1.5 }}>This geofence is used to allow mobile check-in only when users are physically present at the shop location. If they are outside the premises, the app will prompt: “Please be present on shop to login.”</div>
+                <div style={{ color: '#64748b', fontSize: 12, lineHeight: 1.5 }}>Employees must be within this distance of the store to check in.</div>
               </div>
 
               <label style={{ display: 'grid', gap: 8, color: '#475569', fontWeight: 700 }}>
@@ -806,32 +828,32 @@ export default function StoresPage() {
                 </select>
                 {formErrors.status && <span style={{ color: '#b91c1c', fontSize: 12, marginTop: 2 }}>{formErrors.status}</span>}
               </label>
-            </div>
+            </fieldset>
 
-            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', justifyContent: 'flex-start', padding: '18px 24px 24px', marginTop: 8, borderTop: '1px solid rgba(148,163,184,0.2)', position: 'sticky', bottom: 0, background: 'rgba(255,255,255,0.96)', zIndex: 1 }}>
+            <footer className={adminStyles.dialogFooter}>
               <button type="button" onClick={() => void handleSubmit()} disabled={isSavingStore} style={{ padding: '10px 16px', borderRadius: 10, background: '#111827', color: '#fff', border: 'none', cursor: isSavingStore ? 'not-allowed' : 'pointer', fontWeight: 700, opacity: isSavingStore ? 0.7 : 1 }}>
                 {isSavingStore ? (editingId ? 'Updating...' : 'Adding...') : (editingId ? 'Update store' : 'Add store')}
               </button>
 
-              <button type="button" onClick={() => { setEditingId(null); setShowStoreModal(false); setForm({ ...emptyStoreForm }); setFormErrors({}); }} style={{ padding: '10px 16px', borderRadius: 10, background: '#e2e8f0', color: '#0f172a', border: 'none', cursor: 'pointer', fontWeight: 700 }}>
+              <button type="button" disabled={isSavingStore} onClick={() => { setEditingId(null); setShowStoreModal(false); setForm({ ...emptyStoreForm }); setFormErrors({}); }} style={{ padding: '10px 16px', borderRadius: 10, background: '#e2e8f0', color: '#0f172a', border: 'none', cursor: 'pointer', fontWeight: 700 }}>
                 Cancel
               </button>
-            </div>
-          </div>
-        </div>
+            </footer>
+        </AdminDialog>
       )}
 
-      <div className="card" style={{ padding: 18, borderRadius: 18, border: '1px solid rgba(148,163,184,0.18)', boxShadow: '0 12px 28px rgba(15, 23, 42, 0.04)' }}>
+      <section className={adminStyles.panel}>
+        <div className={adminStyles.panelHeader}><div><h2>Store directory</h2><p>Manage store details, location boundaries and attendance limits.</p></div></div>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 16 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search store, city or manager"
+              aria-label="Search stores" placeholder="Search store, city or manager"
               style={{ minWidth: 260, height: 42, padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(148,163,184,0.35)', background: 'rgba(255,255,255,0.42)', color: '#0f172a', fontSize: 15 }}
             />
 
-            <select value={selectedType} onChange={(event) => setSelectedType(event.target.value)} style={{ height: 42, minWidth: 160, padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(148,163,184,0.35)', background: 'rgba(255,255,255,0.42)', color: '#0f172a', fontSize: 15 }}>
+            <select aria-label="Filter by store type" value={selectedType} onChange={(event) => setSelectedType(event.target.value)} style={{ height: 42, minWidth: 160, padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(148,163,184,0.35)', background: 'rgba(255,255,255,0.42)', color: '#0f172a', fontSize: 15 }}>
               <option value="All">All Types</option>
               {storeTypeOptions.map((type) => (
                 <option key={type.id} value={type.value}>{type.label}</option>
@@ -840,14 +862,7 @@ export default function StoresPage() {
 
           </div>
 
-          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
-            <button type="button" onClick={() => void loadStores()} style={{ padding: '10px 16px', background: '#e2e8f0', color: '#0f172a', border: 'none', borderRadius: 10, cursor: 'pointer', fontWeight: 700 }}>
-              {isLoading ? 'Refreshing...' : 'Refresh'}
-            </button>
-            <button type="button" onClick={() => { setEditingId(null); setForm({ ...emptyStoreForm }); setShowStoreModal(true); }} style={{ padding: '10px 16px', background: '#111827', color: '#fff', border: 'none', borderRadius: 10, cursor: 'pointer', fontWeight: 700 }}>
-              + Add Store
-            </button>
-          </div>
+
         </div>
 
         <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
@@ -856,7 +871,7 @@ export default function StoresPage() {
           ) : hasError ? (
             <EmptyState variant="error" onRetry={loadStores} />
           ) : (
-            <table className="table" style={{ minWidth: 700, borderCollapse: 'collapse' }}>
+            <table className={adminStyles.table}>
               <thead>
                 <tr>
                   <th style={{ textTransform: 'uppercase', letterSpacing: '0.08em', fontSize: 12, color: '#64748b', padding: '14px 12px' }}>
@@ -922,7 +937,7 @@ export default function StoresPage() {
             </table>
           )}
         </div>
-      </div>
-    </main>
+      </section>
+    </AdminWorkspace>
   );
 }

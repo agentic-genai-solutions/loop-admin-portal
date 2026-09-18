@@ -112,6 +112,7 @@ export async function fetchStores() {
     return {
       id: store._id ?? store.id ?? index + 1,
       name: store.name ?? `Store ${index + 1}`,
+      countryCode: normalizeOptionValue(store.countryCode ?? address.countryCode) || 'IN',
       locality: normalizeText(store.locality ?? address.locality),
       city: normalizeText(store.city ?? address.city),
       district: normalizeText(store.district ?? address.district),
@@ -273,7 +274,7 @@ export async function fetchIncentives() {
     programs: programs.map(program => ({
       ...program, id: String(program.id || program._id),
       type: ({ organization: 'Organization-wide', store: 'Store-wide', employee: 'Employee-specific' } as Record<string, string>)[program.scope] || program.scope,
-      payout: `${program.currency} ${Number(program.amount).toLocaleString()}`,
+      payout: new Intl.NumberFormat('en-IN', { style: 'currency', currency: program.currency || 'INR' }).format(Number(program.amount)),
       target: [program.targetMetric, program.targetValue].filter(Boolean).join(' · ') || '—',
       stores: program.storeIds?.length ? program.storeIds.map((id: string) => stores.get(id) || id) : ['All Stores'],
       employees: program.employeeIds?.length ? program.employeeIds.map((id: string) => names.get(id) || id) : ['All Employees'],
@@ -281,7 +282,7 @@ export async function fetchIncentives() {
     })),
     entries,
     summary: {
-      monthlyPayout: Object.entries(totals).map(([currency, amount]) => `${currency} ${amount.toLocaleString()}`).join(' · ') || '0',
+      monthlyPayout: Object.entries(totals).map(([currency, amount]) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: currency || 'INR' }).format(amount)).join(' · ') || '0',
       activePrograms: programs.filter(program => program.status === 'Active').length,
       approvalRate: entries.length ? `${Math.round(approved.length / entries.length * 100)}%` : '0%',
       staffEntries: entries.length,

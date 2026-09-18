@@ -5,6 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import { normalizeRole, shouldShowStoreField } from '@/lib/utils';
 import Sidebar from './Sidebar';
+import { financeNavigation } from '@/lib/finance-navigation';
 
 const SESSION_TIMEOUT_MS = 15 * 60 * 1000;
 
@@ -138,6 +139,9 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
   const pageMeta = useMemo(() => {
     const currentPath = pathname || '/';
     if (currentPath === '/attendance/timing') return { eyebrow: 'Workforce', title: 'Attendance timing' };
+    if (currentPath === '/finance' || currentPath.startsWith('/finance/')) {
+      return { eyebrow: 'Finance', title: financeNavigation.find(item => item.href === currentPath)?.label || 'Payroll management' };
+    }
     if (currentPath === '/incentives' || currentPath.startsWith('/incentives/')) {
       return { eyebrow: 'Incentives', title: currentPath.startsWith('/incentives/programs') ? 'Programs' : currentPath.startsWith('/incentives/entries') ? 'Employee rewards' : 'Overview' };
     }

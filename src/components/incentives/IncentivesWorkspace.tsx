@@ -1,5 +1,6 @@
 'use client';
 
+import { currencyForCountry } from '@/lib/store-currency';
 import Link from 'next/link';
 import styles from './incentives.module.css';
 import ShopRewards from './ShopRewards';
@@ -32,7 +33,7 @@ export type IncentiveProgram = {
   targetMetric?: string;
   targetValue?: string;
 };
-type DropdownOption = { id: string; name: string };
+type DropdownOption = { id: string; name: string; countryCode?: string; storeId?: string };
 type EmployeeOptionResponse = {
   _id?: string;
   id?: string;
@@ -47,12 +48,13 @@ type EmployeeOptionResponse = {
   deletedAt?: string;
 };
 
-const emptySummary = { monthlyPayout: '$0', activePrograms: 0, approvalRate: '0%', staffEntries: 0 };
+const emptySummary = { monthlyPayout: '₹0', activePrograms: 0, approvalRate: '0%', staffEntries: 0 };
 const initialProgramForm = {
   name: '',
   scope: 'Organization-wide',
   frequency: 'Monthly',
   amount: '',
+  eligibleStores: [] as string[],
   targetMetric: 'Sales value',
   targetValue: '',
   stores: 'All Stores',
@@ -78,6 +80,7 @@ function readSavedPrograms(): IncentiveProgram[] {
 export default function IncentivesWorkspace({ view, initiallyOpen = false }: { view: View; initiallyOpen?: boolean }) {
   const [isAwarding, setIsAwarding] = useState(false);
   const [rewardRevision, setRewardRevision] = useState(0);
+  const [formError, setFormError] = useState('');
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -100,6 +103,7 @@ export default function IncentivesWorkspace({ view, initiallyOpen = false }: { v
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
   const showToast = useCallback((message: string, type: 'success' | 'error' = 'success') => {
+    setFormError(type === 'error' ? message : '');
     setToast({ message, type });
   }, []);
 
@@ -127,6 +131,7 @@ export default function IncentivesWorkspace({ view, initiallyOpen = false }: { v
 
   useEffect(() => {
     if (!isCreatingProgram) return;
+    setFormError('');
     const dialog = dialogRef.current;
     const previousFocus = document.activeElement as HTMLElement | null;
     const previousOverflow = document.body.style.overflow;
@@ -145,7 +150,7 @@ export default function IncentivesWorkspace({ view, initiallyOpen = false }: { v
     setStoresLoading(true);
     setStoresError(false);
     fetchStores().then((rows) => {
-      if (!cancelled) setStores(rows.filter((store) => !store.isDeleted).map((store) => ({ id: String(store.id), name: String(store.name) })).sort((a, b) => a.name.localeCompare(b.name)));
+      if (!cancelled) setStores(rows.filter((store) => !store.isDeleted).map((store) => ({ id: String(store.id), name: String(store.name), countryCode: store.countryCode })).sort((a, b) => a.name.localeCompare(b.name)));
     }).catch(() => {
       if (!cancelled) setStoresError(true);
     }).finally(() => {
@@ -165,6 +170,7 @@ export default function IncentivesWorkspace({ view, initiallyOpen = false }: { v
         .filter((employee) => !employee.isDeleted && !employee.deletedAt && employee.isActive !== false && (store === 'All Stores' || employee.storeId === store))
         .map((employee) => ({
           id: String(employee.employeeId || ''),
+          storeId: employee.storeId,
           name: [employee.firstName, employee.lastName].filter(Boolean).join(' ').trim() || employee.email || employee.employeeCode || 'Unnamed employee',
         }))
         .filter((employee) => employee.id)
@@ -205,11 +211,22 @@ export default function IncentivesWorkspace({ view, initiallyOpen = false }: { v
   };
 
   const handleProgramFormChange = <K extends keyof typeof initialProgramForm>(field: K, value: (typeof initialProgramForm)[K]) => {
-    setProgramForm((current) => ({ ...current, [field]: value, ...(field === 'stores' ? { employees: 'All Employees' } : {}) }));
+    setProgramForm((current) => ({ ...current, [field]: value, ...(field === 'stores' ? { employees: 'All Employees' } : {}), ...(field === 'scope' ? { stores: 'All Stores', employees: 'All Employees' } : {}) }));
   };
+
+  const currencyStores = programForm.scope === 'Store-wide'
+    ? stores.filter(store => programForm.eligibleStores.includes(store.id))
+    : programForm.scope === 'Employee-specific'
+      ? stores.filter(store => store.id === employeeOptions?.items.find(employee => employee.id === programForm.employees)?.storeId)
+      : stores;
+  const currencies = [...new Set(currencyStores.map(store => currencyForCountry(store.countryCode)))];
+  const programCurrency = currencies.length === 1 ? currencies[0] : undefined;
+  const currencyError = storesLoading ? 'Loading store currency…' : storesError ? 'Store details could not be loaded. Close and reopen the panel to retry.' : !currencyStores.length ? 'Choose eligible stores or an employee with an assigned store.' : currencies.includes(undefined) ? 'Set a supported country in the store details before creating this program.' : currencies.length > 1 ? 'These stores use different currencies. Choose stores with the same currency and create a separate program for each currency.' : '';
+  const currencySymbol = programCurrency ? new Intl.NumberFormat('en-IN', {style:'currency',currency:programCurrency}).formatToParts(0).find(part => part.type === 'currency')?.value : '';
 
   const handleSaveProgram = async () => {
     if (savingRef.current) return;
+    if (currencyError || !programCurrency) { setFormError(currencyError || 'Choose a store to determine currency.'); return; }
     const trimmedName = programForm.name.trim();
     if (!trimmedName) {
       showToast('Program name is required before saving.', 'error');
@@ -221,8 +238,8 @@ export default function IncentivesWorkspace({ view, initiallyOpen = false }: { v
       showToast('Enter a reward amount greater than zero.', 'error');
       return;
     }
-    if (programForm.scope === 'Store-wide' && programForm.stores === 'All Stores') {
-      showToast('Select a store for a store-wide program.', 'error');
+    if (programForm.scope === 'Store-wide' && !programForm.eligibleStores.length) {
+      showToast('Select at least one eligible store.', 'error');
       return;
     }
     if (programForm.scope === 'Employee-specific' && programForm.employees === 'All Employees') {
@@ -239,9 +256,9 @@ export default function IncentivesWorkspace({ view, initiallyOpen = false }: { v
     try {
       await apiFetch('/incentives/programs', { method: 'POST', body: JSON.stringify({
         name: trimmedName, scope: programForm.scope === 'Store-wide' ? 'store' : programForm.scope === 'Employee-specific' ? 'employee' : 'organization',
-        amount: normalizedAmount, currency: 'USD', frequency: programForm.frequency,
+        amount: normalizedAmount, currency: programCurrency, frequency: programForm.frequency,
         guideline: programForm.guideline, targetMetric: programForm.targetMetric, targetValue: programForm.targetValue,
-        storeIds: programForm.scope === 'Store-wide' ? [programForm.stores] : [],
+        storeIds: programForm.scope === 'Store-wide' ? programForm.eligibleStores : [],
         employeeIds: programForm.scope === 'Employee-specific' ? [programForm.employees] : [],
         notificationScope: programForm.notificationScope,
       }) });
@@ -290,100 +307,28 @@ export default function IncentivesWorkspace({ view, initiallyOpen = false }: { v
         {isLoading ? <TableSkeleton columns={5} rows={4} /> : hasLoadError ? <EmptyState variant="error" onRetry={loadData} /> : programs.length === 0 ? <div className={styles.empty}><span className={styles.emptyIcon}>✧</span><h3>No programs yet</h3><p>Create a reward program and it will be listed here.</p><button type="button" className={styles.primary} onClick={() => setIsCreatingProgram(true)}>Create first program</button></div> : <div className={styles.tableWrap}><table className="table"><thead><tr>{([['name', 'Program'], ['type', 'Eligibility'], ['payout', 'Reward'], ['target', 'Target'], ['status', 'Status']] as const).map(([key, label]) => <th key={key} aria-sort={programSortBy === key ? programSortDirection === 'asc' ? 'ascending' : 'descending' : 'none'}><button className={styles.sortButton} onClick={() => handleProgramSort(key)}>{label} {getProgramSortArrow(key)}</button></th>)}</tr></thead><tbody>{sortedPrograms.length ? sortedPrograms.map((program) => <tr key={program.id}><td><button className={styles.programName} onClick={() => setSelectedProgram(program)}>{program.name}</button><small className={styles.cellSub}>{program.frequency || 'Monthly'}{!/^[a-f\d]{24}$/i.test(program.id || '') ? ' · Browser draft' : ''}</small></td><td>{program.type}<small className={styles.cellSub}>{(program.stores || ['All Stores']).join(', ')} · {(program.employees || ['All Employees']).join(', ')}</small></td><td><strong>{program.payout}</strong></td><td>{program.target}</td><td><span className={`badge ${program.status === 'Active' ? 'success' : 'info'}`}>{program.status}</span></td></tr>) : <EmptyState colSpan={5} title="No matching programs" description="Try another search or status filter." />}</tbody></table></div>}
       </section>}
       {view === 'entries' && <ShopRewards key={rewardRevision} />}
-      {isCreatingProgram && <dialog ref={dialogRef} className={styles.modal} aria-labelledby="new-program-title" onCancel={(event) => { if (saving) event.preventDefault(); else setIsCreatingProgram(false); }} onClick={(event) => {
-        if (!saving && event.target === event.currentTarget) {
-          const bounds = event.currentTarget.getBoundingClientRect();
-          if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) setIsCreatingProgram(false);
-        }
-      }}>
-        {toast && <FeedbackToast title={toast.type === 'success' ? 'Success' : 'Error'} description={toast.message} type={toast.type} onClose={() => setToast(null)} durationMs={4000} />}
-        <form className={`${styles.panel} ${styles.form}`} onSubmit={(event) => { event.preventDefault(); handleSaveProgram(); }}>
-        <div className={styles.panelHeader}><div><h2 id="new-program-title">New program</h2></div><button type="button" className={styles.secondary} aria-label="Close new program" disabled={saving} onClick={() => setIsCreatingProgram(false)}>×</button></div>
-        <p className={styles.storageNote}>Set the reward and choose who hears about it when an employee earns it.</p>
-            <div className={styles.formGrid}>
-              <div className={styles.formSection}><span>01</span><div><h3>Reward & target</h3></div></div>
-              <label style={{ display: 'grid', gap: 6, fontWeight: 700, color: '#0f172a' }}>
-                Program name
-                <input required autoFocus value={programForm.name} onChange={(event) => handleProgramFormChange('name', event.target.value)} placeholder="WOW Bill for Single Customer Purchase" style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(148,163,184,0.5)', fontSize: 14 }} />
-              </label>
-
-              <label style={{ display: 'grid', gap: 6, fontWeight: 700, color: '#0f172a' }}>
-                Scope
-                <select value={programForm.scope} onChange={(event) => handleProgramFormChange('scope', event.target.value)} style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(148,163,184,0.5)', fontSize: 14 }}>
-                  <option value="Organization-wide">Organization-wide</option>
-                  <option value="Store-wide">Store-wide</option>
-                  <option value="Employee-specific">Employee-specific</option>
-                </select>
-              </label>
-
-              <label style={{ display: 'grid', gap: 6, fontWeight: 700, color: '#0f172a' }}>
-                Frequency
-                <select value={programForm.frequency} onChange={(event) => handleProgramFormChange('frequency', event.target.value)} style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(148,163,184,0.5)', fontSize: 14 }}>
-                  <option value="Daily">Daily</option>
-                  <option value="Weekly">Weekly</option>
-                  <option value="Monthly">Monthly</option>
-                </select>
-              </label>
-
-              <label style={{ display: 'grid', gap: 6, fontWeight: 700, color: '#0f172a' }}>
-                Reward amount (USD)
-                <input type="number" min="0.01" step="0.01" required value={programForm.amount} onChange={(event) => handleProgramFormChange('amount', event.target.value)} placeholder="250" style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(148,163,184,0.5)', fontSize: 14 }} />
-              </label>
-
-              <label style={{ display: 'grid', gap: 6, fontWeight: 700, color: '#0f172a' }}>
-                Target metric
-                <input value={programForm.targetMetric} onChange={(event) => handleProgramFormChange('targetMetric', event.target.value)} placeholder="Sales value" style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(148,163,184,0.5)', fontSize: 14 }} />
-              </label>
-
-              <label style={{ display: 'grid', gap: 6, fontWeight: 700, color: '#0f172a' }}>
-                Target value
-                <input value={programForm.targetValue} onChange={(event) => handleProgramFormChange('targetValue', event.target.value)} placeholder="e.g. 5000" style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(148,163,184,0.5)', fontSize: 14 }} />
-              </label>
-
-              <div className={styles.formSection}><span>02</span><div><h3>Eligibility & communication</h3></div></div>
-              <label style={{ display: 'grid', gap: 6, fontWeight: 700, color: '#0f172a' }}>
-                Stores
-                <select value={programForm.stores} onChange={(event) => handleProgramFormChange('stores', event.target.value)} disabled={storesLoading || storesError} style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(148,163,184,0.5)', fontSize: 14 }}>
-                  <option value="All Stores">All Stores</option>
-                  {stores.map((store) => <option key={store.id} value={store.id}>{store.name}</option>)}
-                </select>
-                {storesLoading && <small role="status">Loading stores…</small>}
-                {storesError && <small role="alert">Unable to load stores. Close and reopen this form to retry.</small>}
-                {!storesLoading && !storesError && stores.length === 0 && <small role="status">No stores available.</small>}
-              </label>
-
-              <label style={{ display: 'grid', gap: 6, fontWeight: 700, color: '#0f172a' }}>
-                Employees
-                <select value={programForm.employees} onChange={(event) => handleProgramFormChange('employees', event.target.value)} disabled={employeesLoading || employeeOptions?.error} style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(148,163,184,0.5)', fontSize: 14 }}>
-                  <option value="All Employees">{programForm.stores === 'All Stores' ? 'All Employees' : 'All Employees in selected store'}</option>
-                  {!employeesLoading && employeeOptions?.items.map((employee) => <option key={employee.id} value={employee.id}>{employee.name}</option>)}
-                </select>
-                {employeesLoading && <small role="status">Loading employees…</small>}
-                {!employeesLoading && employeeOptions?.error && <small role="alert">Unable to load employees. Change the store or reopen this form to retry.</small>}
-                {!employeesLoading && !employeeOptions?.error && employeeOptions?.items.length === 0 && <small role="status">No employees available{programForm.stores === 'All Stores' ? '.' : ' for this store.'}</small>}
-              </label>
-
-              <label style={{ display: 'grid', gap: 6, fontWeight: 700, color: '#0f172a' }}>
-                Who should receive reward notifications?
-                <select value={programForm.notificationScope} onChange={(event) => handleProgramFormChange('notificationScope', event.target.value)}>
-                  <option value="employee">Employee only — personal congratulations</option>
-                  <option value="store">Employee’s store — celebrate with their team</option>
-                  <option value="organization">Organization-wide — tell everyone</option>
-                </select>
-                <small>Sent in the app when a reward is awarded or approved. Store and organization announcements also include personal congratulations.</small>
-              </label>
-
-              <label style={{ display: 'grid', gap: 6, fontWeight: 700, color: '#0f172a', gridColumn: '1 / -1' }}>
-                Guideline / rule
-                <textarea value={programForm.guideline} onChange={(event) => handleProgramFormChange('guideline', event.target.value)} placeholder="Reward when a single customer purchase crosses the configured basket threshold..." rows={4} style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(148,163,184,0.5)', fontSize: 14, resize: 'vertical' }} />
-              </label>
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 18 }}>
-              <button type="button" disabled={saving} onClick={() => setIsCreatingProgram(false)} style={{ padding: '12px 18px', borderRadius: 12, background: '#e2e8f0', color: '#0f172a', border: 'none', fontWeight: 800, cursor: 'pointer' }}>Cancel</button>
-              <button type="submit" disabled={saving} style={{ padding: '12px 18px', borderRadius: 12, background: '#0f172a', color: '#fff', border: 'none', fontWeight: 800, cursor: 'pointer' }}>{saving ? 'Saving…' : 'Save program'}</button>
-            </div>
-      </form></dialog>}
+      {isCreatingProgram && <dialog ref={dialogRef} className={styles.programDrawer} aria-labelledby="new-program-title" onCancel={event => { if(saving) event.preventDefault(); else setIsCreatingProgram(false); }}>
+        <header className={styles.awardHeader}><div><h2 id="new-program-title">New incentive program</h2><p className={styles.hint}>Choose who can earn it, then set the reward.</p></div><button type="button" className={styles.secondary} aria-label="Close new program" disabled={saving} onClick={() => setIsCreatingProgram(false)}>×</button></header>
+        <form className={styles.awardForm} onSubmit={event => {event.preventDefault(); void handleSaveProgram();}}>
+          <div className={styles.awardScroll}>
+            <fieldset className={styles.programFields} disabled={saving}>
+              {formError && <p role="alert" className={styles.awardError}>{formError}</p>}
+              <label>Program name<input required autoFocus value={programForm.name} onChange={e => handleProgramFormChange('name',e.target.value)} placeholder="e.g. Outstanding sales" /></label>
+              <section className={styles.programSection}><h3>Who can earn this reward?</h3>
+                <label>Eligible people<select value={programForm.scope} onChange={e => handleProgramFormChange('scope',e.target.value)}><option value="Organization-wide">Everyone in the organization</option><option value="Store-wide">People in selected stores</option><option value="Employee-specific">A specific employee</option></select></label>
+                {programForm.scope === 'Store-wide' && <fieldset className={styles.storeChoices}><legend>Eligible stores</legend>{stores.map(store => <label key={store.id}><input type="checkbox" checked={programForm.eligibleStores.includes(store.id)} onChange={e => handleProgramFormChange('eligibleStores',e.target.checked ? [...programForm.eligibleStores,store.id] : programForm.eligibleStores.filter(id => id !== store.id))} /><span>{store.name}<small>{currencyForCountry(store.countryCode) || 'Country required'}</small></span></label>)}</fieldset>}
+                {programForm.scope === 'Employee-specific' && <><label>Store<select value={programForm.stores} disabled={storesLoading || storesError} onChange={e => handleProgramFormChange('stores',e.target.value)}><option value="All Stores">All stores</option>{stores.map(store => <option key={store.id} value={store.id}>{store.name}</option>)}</select></label><label>Employee<select value={programForm.employees} disabled={employeesLoading || employeeOptions?.error} onChange={e => handleProgramFormChange('employees',e.target.value)}><option value="All Employees">Choose an employee</option>{!employeesLoading && employeeOptions?.items.map(employee => <option key={employee.id} value={employee.id}>{employee.name}</option>)}</select></label>{employeeOptions?.error && <p className={styles.awardError}>Employees could not be loaded. Change the store to retry.</p>}</>}
+              </section>
+              <section className={styles.programSection}><h3>Reward</h3><div className={styles.awardColumns}><label>Amount {currencySymbol && `(${currencySymbol})`}<input required type="number" min="0.01" step="0.01" value={programForm.amount} onChange={e => handleProgramFormChange('amount',e.target.value)} placeholder="250" /></label><label>How often?<select value={programForm.frequency} onChange={e => handleProgramFormChange('frequency',e.target.value)}><option>Daily</option><option>Weekly</option><option>Monthly</option></select></label></div>
+                <p className={currencyError ? styles.awardError : styles.currencyNote} role="status">{currencyError || `Currency: ${programCurrency} · Set from the eligible stores’ country.`}</p>
+              </section>
+              <section className={styles.programSection}><h3>When someone earns the reward</h3><label>Notify<select value={programForm.notificationScope} onChange={e => handleProgramFormChange('notificationScope',e.target.value)}><option value="employee">Only the employee</option><option value="store">The employee and their store</option><option value="organization">Everyone in the organization</option></select><small>Sent when a reward is awarded or approved.</small></label></section>
+              <details className={styles.programSection}><summary>Target &amp; guidelines <small>Optional</small></summary><div className={styles.programFields}><div className={styles.awardColumns}><label>Measure<input value={programForm.targetMetric} onChange={e => handleProgramFormChange('targetMetric',e.target.value)} placeholder="Sales value" /></label><label>Target<input value={programForm.targetValue} onChange={e => handleProgramFormChange('targetValue',e.target.value)} placeholder="e.g. 5000" /></label></div><label>Guidelines<textarea rows={3} value={programForm.guideline} onChange={e => handleProgramFormChange('guideline',e.target.value)} placeholder="Explain what the employee needs to achieve." /></label></div></details>
+            </fieldset>
+          </div>
+          <footer className={styles.awardFooter}><span>{programCurrency && programForm.amount ? new Intl.NumberFormat('en-IN',{style:'currency',currency:programCurrency}).format(Number(programForm.amount) || 0) + ' per reward' : 'Set up your reward above'}</span><div><button type="button" className={styles.secondary} disabled={saving} onClick={() => setIsCreatingProgram(false)}>Cancel</button><button type="submit" className={styles.primary} disabled={saving || Boolean(currencyError)}>{saving ? 'Saving…' : 'Create program'}</button></div></footer>
+        </form>
+      </dialog>}
       {selectedProgram && <section id="incentive-program-details" tabIndex={-1} className={styles.panel} aria-label="Program details">
         <div className={styles.panelHeader}><div><h2>{selectedProgram.name}</h2></div><button className={styles.secondary} onClick={() => setSelectedProgram(null)}>Close details</button></div>
         <p>{selectedProgram.guideline}</p><dl className={styles.details}>{[['Status', selectedProgram.status], ['Scope', selectedProgram.type], ['Reward', selectedProgram.payout], ['Frequency', selectedProgram.frequency], ['Target', selectedProgram.target], ['Stores', selectedProgram.stores?.join(', ')], ['Employees', selectedProgram.employees?.join(', ')], ['Notification', selectedProgram.notification]].map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value || '—'}</dd></div>)}</dl>

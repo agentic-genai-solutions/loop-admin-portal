@@ -3,7 +3,11 @@
 import AttendancePolicyEditor from '@/components/AttendancePolicyEditor';
 
 import { ConfirmDialog, FeedbackToast } from '@/components/Feedback';
-import { apiFetchWithRetry } from '@/lib/api';
+import MasterDataWorkspace from '@/components/master-data/MasterDataWorkspace';
+import { AdminDialog } from '@/components/admin/AdminWorkspace';
+import admin from '@/components/admin/admin.module.css';
+import master from '@/components/master-data/master-data.module.css';
+import { apiFetch, apiFetchWithRetry } from '@/lib/api';
 import { getFieldBorder, inlineFieldErrorStyle } from '@/lib/form-ui';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
@@ -97,6 +101,15 @@ const iconButtonStyle: React.CSSProperties = {
 };
 
 export default function SchedulesMasterDataPage() {
+  const mutationLock = useRef(false);
+  const [feedbackError, setFeedbackError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const runMutation = async (operation: () => Promise<void>) => {
+    if (mutationLock.current) return;
+    mutationLock.current = true; setBusy(true); setFeedbackError('');
+    try { await operation(); } finally { mutationLock.current = false; setBusy(false); }
+  };
+
   const scheduleNameInputRef = useRef<HTMLInputElement | null>(null);
   const [records, setRecords] = useState<ScheduleRecord[]>([]);
   const [designationOptions, setDesignationOptions] = useState<DesignationOption[]>([]);
@@ -117,6 +130,7 @@ export default function SchedulesMasterDataPage() {
   const [formErrors, setFormErrors] = useState<ScheduleFormErrors>({});
 
   const showToast = useCallback((description: string, type: 'success' | 'error' = 'success', title?: string) => {
+    setFeedbackError(type === 'error' ? description : '');
     setToast({
       title: title ?? (type === 'success' ? 'Success' : 'Error'),
       description,
@@ -208,6 +222,7 @@ export default function SchedulesMasterDataPage() {
       return;
     }
 
+    setFeedbackError('');
     setIsLoading(true);
 
     try {
@@ -217,8 +232,8 @@ export default function SchedulesMasterDataPage() {
 
       const [schedulesData, designationData, storesData] = await Promise.all([
         apiFetchWithRetry<ScheduleRecord[]>(scheduleQuery),
-        apiFetchWithRetry<Array<{ _id?: string; code?: string; label?: string }>>('/master-data/designations').catch(() => []),
-        apiFetchWithRetry<Array<{ _id?: string; id?: string; name?: string }>>('/stores').catch(() => []),
+        apiFetchWithRetry<Array<{ _id?: string; code?: string; label?: string }>>('/master-data/designations'),
+        apiFetchWithRetry<Array<{ _id?: string; id?: string; name?: string }>>('/stores'),
       ]);
 
       const normalizedDesignations = (Array.isArray(designationData) ? designationData : [])
@@ -276,6 +291,7 @@ export default function SchedulesMasterDataPage() {
   }, [isFormOpen]);
 
   const resetForm = () => {
+    setFeedbackError('');
     const nextForm = createEmptyForm();
     if (assignedStoreId) {
       nextForm.storeId = assignedStoreId;
@@ -324,7 +340,8 @@ export default function SchedulesMasterDataPage() {
     });
   };
 
-  const saveRecord = async () => {
+  const saveRecord = () => runMutation(() => saveRecordRequest());
+  const saveRecordRequest = async () => {
     const nextErrors: ScheduleFormErrors = {};
     const breakRowErrors: ScheduleBreakFormErrors[] = [];
 
@@ -447,12 +464,12 @@ export default function SchedulesMasterDataPage() {
       };
 
       if (editingId) {
-        await apiFetchWithRetry(`/admin/schedules/${editingId}`, {
+        await apiFetch(`/admin/schedules/${editingId}`, {
           method: 'PATCH',
           body: JSON.stringify(payload),
         });
       } else {
-        await apiFetchWithRetry('/admin/schedules', {
+        await apiFetch('/admin/schedules', {
           method: 'POST',
           body: JSON.stringify(payload),
         });
@@ -466,9 +483,10 @@ export default function SchedulesMasterDataPage() {
     }
   };
 
-  const toggleStatus = async (record: ScheduleRecord) => {
+  const toggleStatus = (record: ScheduleRecord) => runMutation(() => toggleStatusRequest(record));
+  const toggleStatusRequest = async (record: ScheduleRecord) => {
     try {
-      await apiFetchWithRetry(`/admin/schedules/${record._id}/status`, {
+      await apiFetch(`/admin/schedules/${record._id}/status`, {
         method: 'PATCH',
         body: JSON.stringify({ isActive: !record.isActive }),
       });
@@ -479,9 +497,10 @@ export default function SchedulesMasterDataPage() {
     }
   };
 
-  const deleteRecord = async (id: string) => {
+  const deleteRecord = (id: string) => runMutation(() => deleteRecordRequest(id));
+  const deleteRecordRequest = async (id: string) => {
     try {
-      await apiFetchWithRetry(`/admin/schedules/${id}`, {
+      await apiFetch(`/admin/schedules/${id}`, {
         method: 'DELETE',
       });
 
@@ -591,8 +610,9 @@ export default function SchedulesMasterDataPage() {
   }, [designationFilter, designationLabelById, parseTimeToMinutes, records, searchQuery, sortDirection, sortField, statusFilter, storeLabelById]);
 
   return (
-    <main className="portal-page portal-page-grid" style={{ display: 'grid', gap: 20 }}>
-      <div className="card" style={{ padding: 20 }}><AttendancePolicyEditor scope="company" profileId="company" name="Entire company" /></div>
+    <MasterDataWorkspace actions={<><button className={admin.secondary} disabled={isLoading || busy} onClick={() => void loadData()}>Refresh</button><button className={admin.primary} disabled={isLoading || busy} onClick={() => { resetForm(); setIsFormOpen(true); }}>+ Add schedule</button></>}>
+      {feedbackError && !isFormOpen && <p className={admin.error} role="alert">{feedbackError}</p>}
+      <details className={master.policy}><summary>Company attendance policy</summary><AttendancePolicyEditor scope="company" profileId="company" name="Entire company" /></details>
       {toast && (
         <FeedbackToast
           title={toast.title}
@@ -604,6 +624,7 @@ export default function SchedulesMasterDataPage() {
       )}
 
       <ConfirmDialog
+        isProcessing={busy}
         open={Boolean(deleteCandidate)}
         title="Delete schedule"
         description={`Are you sure you want to delete ${deleteCandidate?.name ?? 'this schedule'}? This action cannot be undone.`}
@@ -613,33 +634,21 @@ export default function SchedulesMasterDataPage() {
       />
 
       {isFormOpen && (
-        <div
-          role="presentation"
-          onClick={closeForm}
-          style={{ position: 'fixed', inset: 0, zIndex: 70, background: 'rgba(15,23,42,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}
-        >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-label={editingId ? 'Edit schedule' : 'Create schedule'}
-            onClick={(event) => event.stopPropagation()}
-            style={{ width: 'min(920px, 100%)', maxHeight: '90vh', overflowY: 'auto', background: '#f8fafc', borderRadius: 18, boxShadow: '0 28px 80px rgba(15, 23, 42, 0.28)', border: '1px solid rgba(148,163,184,0.2)' }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '18px 22px', borderBottom: '1px solid rgba(148,163,184,0.18)' }}>
+        <AdminDialog title="Schedules" busy={busy} onClose={closeForm}>
+            <div className={admin.dialogHeader}>
               <div>
                 <h2 style={{ margin: 0, fontSize: 26, letterSpacing: '-0.03em' }}>{editingId ? 'Edit schedule' : 'Create schedule'}</h2>
                 <p style={{ margin: '6px 0 0', color: '#64748b', fontSize: 13 }}>Configure shift duration and break timing for a staff category.</p>
               </div>
-              <button type="button" aria-label="Close dialog" title="Close dialog" onClick={closeForm} style={{ border: 'none', background: 'transparent', fontSize: 28, cursor: 'pointer', color: '#475569', lineHeight: 1, padding: 0 }}>×</button>
+              <button type="button" disabled={busy} aria-label="Close dialog" title="Close dialog" onClick={closeForm} style={{ border: 'none', background: 'transparent', fontSize: 28, cursor: 'pointer', color: '#475569', lineHeight: 1, padding: 0 }}>×</button>
             </div>
 
-            <form onSubmit={(event) => { event.preventDefault(); void saveRecord(); }} style={{ padding: 20 }}>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>
-                <div style={{ display: 'grid', gap: 4 }}>
-                  <input ref={scheduleNameInputRef} placeholder="Schedule Name" value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} style={{ padding: '10px 12px', borderRadius: 10, border: getFieldBorder(Boolean(formErrors.name)) }} />
-                  {formErrors.name && <small style={inlineFieldErrorStyle}>{formErrors.name}</small>}
-                </div>
-                <select
+            <form onSubmit={(event) => { event.preventDefault(); void saveRecord(); }} className={master.form}><fieldset disabled={busy}>
+{feedbackError && <p className={admin.error} role="alert">{feedbackError}</p>}
+              <div className={master.formGrid}>
+                <label style={{display: 'grid', gap: 8}}><span>Schedule name</span><input ref={scheduleNameInputRef} placeholder="Schedule Name" value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} style={{ padding: '10px 12px', borderRadius: 10, border: getFieldBorder(Boolean(formErrors.name)) }} />
+                  {formErrors.name && <small style={inlineFieldErrorStyle}>{formErrors.name}</small>}</label>
+                <label style={{display: 'grid', gap: 8}}><span>Designation</span><select
                   value={form.staffCategory}
                   onChange={(event) => setForm((current) => ({ ...current, staffCategory: event.target.value }))}
                   style={{ padding: '10px 12px', borderRadius: 10, border: getFieldBorder(Boolean(formErrors.staffCategory)), background: '#fff' }}
@@ -648,8 +657,8 @@ export default function SchedulesMasterDataPage() {
                   {designationOptions.map((designation) => (
                     <option key={designation.value} value={designation.value}>{designation.label}</option>
                   ))}
-                </select>
-                <select
+                </select></label>
+                <label style={{display: 'grid', gap: 8}}><span>Store</span><select
                   value={form.storeId}
                   onChange={(event) => setForm((current) => ({ ...current, storeId: event.target.value }))}
                   disabled={Boolean(assignedStoreId)}
@@ -659,15 +668,11 @@ export default function SchedulesMasterDataPage() {
                   {storeOptions.map((store) => (
                     <option key={store.value} value={store.value}>{store.label}</option>
                   ))}
-                </select>
-                <div style={{ display: 'grid', gap: 4 }}>
-                  <input type="time" value={form.startTime} onChange={(event) => setForm((current) => ({ ...current, startTime: event.target.value }))} style={{ padding: '10px 12px', borderRadius: 10, border: getFieldBorder(Boolean(formErrors.startTime)) }} />
-                  {formErrors.startTime && <small style={inlineFieldErrorStyle}>{formErrors.startTime}</small>}
-                </div>
-                <div style={{ display: 'grid', gap: 4 }}>
-                  <input type="time" value={form.endTime} onChange={(event) => setForm((current) => ({ ...current, endTime: event.target.value }))} style={{ padding: '10px 12px', borderRadius: 10, border: getFieldBorder(Boolean(formErrors.endTime)) }} />
-                  {formErrors.endTime && <small style={inlineFieldErrorStyle}>{formErrors.endTime}</small>}
-                </div>
+                </select></label>
+                <label style={{display: 'grid', gap: 8}}><span>Shift starts</span><input type="time" value={form.startTime} onChange={(event) => setForm((current) => ({ ...current, startTime: event.target.value }))} style={{ padding: '10px 12px', borderRadius: 10, border: getFieldBorder(Boolean(formErrors.startTime)) }} />
+                  {formErrors.startTime && <small style={inlineFieldErrorStyle}>{formErrors.startTime}</small>}</label>
+                <label style={{display: 'grid', gap: 8}}><span>Shift ends</span><input type="time" value={form.endTime} onChange={(event) => setForm((current) => ({ ...current, endTime: event.target.value }))} style={{ padding: '10px 12px', borderRadius: 10, border: getFieldBorder(Boolean(formErrors.endTime)) }} />
+                  {formErrors.endTime && <small style={inlineFieldErrorStyle}>{formErrors.endTime}</small>}</label>
               </div>
 
               {formErrors.staffCategory && <small style={inlineFieldErrorStyle}>{formErrors.staffCategory}</small>}
@@ -680,12 +685,13 @@ export default function SchedulesMasterDataPage() {
 
               <div style={{ marginTop: 14, display: 'grid', gap: 10 }}>
                 {formErrors.breaks && <small style={inlineFieldErrorStyle}>{formErrors.breaks}</small>}
+                <h3 style={{fontSize:15,margin:0}}>Breaks</h3>
                 {form.breaks.map((item, index) => (
-                  <div key={`${index}-${item.label}-${item.startTime}-${item.endTime}`} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 140px), 1fr))', gap: 10, alignItems: 'center' }}>
+                  <div key={index} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 140px), 1fr))', gap: 10, alignItems: 'center' }}>
                     <div style={{ display: 'grid', gap: 4 }}>
                       <input
                         placeholder={`Break Label ${index + 1}`}
-                        value={item.label}
+                        aria-label={`Break name ${index + 1}`} value={item.label}
                         onChange={(event) => updateBreak(index, 'label', event.target.value)}
                         style={{ padding: '10px 12px', borderRadius: 10, border: getFieldBorder(Boolean(formErrors.breakRows?.[index]?.label)) }}
                       />
@@ -694,7 +700,7 @@ export default function SchedulesMasterDataPage() {
                     <div style={{ display: 'grid', gap: 4 }}>
                       <input
                         type="time"
-                        value={item.startTime}
+                        aria-label={`Break starts ${index + 1}`} value={item.startTime}
                         onChange={(event) => updateBreak(index, 'startTime', event.target.value)}
                         style={{ padding: '10px 12px', borderRadius: 10, border: getFieldBorder(Boolean(formErrors.breakRows?.[index]?.startTime)) }}
                       />
@@ -703,7 +709,7 @@ export default function SchedulesMasterDataPage() {
                     <div style={{ display: 'grid', gap: 4 }}>
                       <input
                         type="time"
-                        value={item.endTime}
+                        aria-label={`Break ends ${index + 1}`} value={item.endTime}
                         onChange={(event) => updateBreak(index, 'endTime', event.target.value)}
                         style={{ padding: '10px 12px', borderRadius: 10, border: getFieldBorder(Boolean(formErrors.breakRows?.[index]?.endTime)) }}
                       />
@@ -720,20 +726,20 @@ export default function SchedulesMasterDataPage() {
                 ))}
 
                 <div>
-                  <button type="button" onClick={addBreak} className="btn btn-secondary">Add Break</button>
+                  <button type="button" onClick={addBreak} className={admin.secondary}>Add Break</button>
                 </div>
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 16 }}>
-                <button type="button" onClick={closeForm} className="btn btn-secondary">Cancel</button>
-                <button type="submit" className="btn btn-primary">{editingId ? 'Update Schedule' : 'Create Schedule'}</button>
+              <div className={master.formFooter}>
+                <button type="button" onClick={closeForm} className={admin.secondary}>Cancel</button>
+                <button type="submit" className={admin.primary}>{editingId ? 'Update Schedule' : 'Create Schedule'}</button>
               </div>
-            </form>
-          </div>
-        </div>
+            </fieldset></form>
+        </AdminDialog>
       )}
 
-      <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+      <div className={master.tablePanel}>
+<div className={admin.panelHeader}><div><h2>Schedules</h2><p>Manage shift times, breaks, and the employees each schedule applies to.</p></div></div>
         <div style={{ padding: 20, borderBottom: '1px solid rgba(148,163,184,0.18)', display: 'grid', gap: 14 }}>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 160px), 1fr))', gap: 10, alignItems: 'center' }}>
             <input
@@ -780,23 +786,14 @@ export default function SchedulesMasterDataPage() {
               <option value="asc">Ascending</option>
               <option value="desc">Descending</option>
             </select>
-            <button
-              type="button"
-              onClick={() => {
-                resetForm();
-                setIsFormOpen(true);
-              }}
-              className="btn btn-primary"
-            >
-              Create Schedule
-            </button>
+
           </div>
         </div>
 
         {isLoading ? (
           <div style={{ padding: 20, color: '#64748b' }}>Loading schedules...</div>
         ) : (
-          <table className="table" style={{ minWidth: 980 }}>
+          <table className={admin.table} style={{ minWidth: 980 }}>
             <thead>
               <tr>
                 <th>Name</th>
@@ -904,6 +901,6 @@ export default function SchedulesMasterDataPage() {
           </table>
         )}
       </div>
-    </main>
+    </MasterDataWorkspace>
   );
 }

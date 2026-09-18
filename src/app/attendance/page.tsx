@@ -1,6 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import WorkforceWorkspace from '@/components/workforce/WorkforceWorkspace';
+import styles from '@/components/admin/admin.module.css';
 import { apiFetchWithRetry } from '@/lib/api';
 
 type StoreOption = {
@@ -84,6 +86,12 @@ function getTodayDateInput() {
 }
 
 export default function AttendancePage() {
+  const attendanceRequest = useRef(0);
+  const reportRequest = useRef(0);
+  const employeeRequest = useRef(0);
+  const [directoryError, setDirectoryError] = useState('');
+  const [storeError, setStoreError] = useState('');
+  const [search, setSearch] = useState('');
   const [storeOptions, setStoreOptions] = useState<StoreOption[]>([]);
   const [selectedStoreId, setSelectedStoreId] = useState('');
   const [selectedDate, setSelectedDate] = useState(getTodayDateInput);
@@ -131,7 +139,7 @@ export default function AttendancePage() {
 
       setAssignedStoreId(currentStoreId);
       setIsStoreLocked(!canViewAllStores && Boolean(currentStoreId));
-      setSelectedStoreId(currentStoreId);
+      setSelectedStoreId(canViewAllStores ? '' : currentStoreId);
     } catch {
       setAssignedStoreId('');
       setIsStoreLocked(false);
@@ -139,7 +147,10 @@ export default function AttendancePage() {
   }, []);
 
   const loadStoreOptions = useCallback(async () => {
-    const storesData = await apiFetchWithRetry<Array<{ _id?: string; id?: string; name?: string }>>('/stores').catch(() => []);
+    setStoreError('');
+    let storesData: Array<{ _id?: string; id?: string; name?: string }>;
+    try { storesData = await apiFetchWithRetry<typeof storesData>('/stores'); }
+    catch { setStoreError('Unable to load stores. Use Refresh to try again.'); return; }
 
     const options = (Array.isArray(storesData) ? storesData : [])
       .map((store) => ({
@@ -151,15 +162,16 @@ export default function AttendancePage() {
 
     setStoreOptions(options);
 
-    if (options.length > 0 && !selectedStoreId) {
+    if (options.length > 0 && !selectedStoreId && isStoreLocked) {
       const fallbackStoreId = assignedStoreId && options.some((item) => item.value === assignedStoreId)
         ? assignedStoreId
         : options[0].value;
       setSelectedStoreId(fallbackStoreId);
     }
-  }, [assignedStoreId, selectedStoreId]);
+  }, [assignedStoreId, selectedStoreId, isStoreLocked]);
 
   const loadAttendance = useCallback(async () => {
+    const request = ++attendanceRequest.current;
     setIsLoading(true);
     setLoadError('');
 
@@ -174,8 +186,10 @@ export default function AttendancePage() {
       }
 
       const response = await apiFetchWithRetry<StorewiseAttendanceResponse>(`/accounting/attendance/store-wise/list?${params.toString()}`);
+      if (request !== attendanceRequest.current) return;
       setAttendance(response);
     } catch (error) {
+      if (request !== attendanceRequest.current) return;
       const message = error instanceof Error && error.message ? error.message : 'Unable to load attendance records.';
       setLoadError(message);
       setAttendance((current) => ({
@@ -192,11 +206,13 @@ export default function AttendancePage() {
         fullDayCount: 0,
       }));
     } finally {
-      setIsLoading(false);
+      if (request === attendanceRequest.current) setIsLoading(false);
     }
   }, [assignedStoreId, isStoreLocked, selectedDate, selectedStoreId]);
 
   const loadEmployeeOptions = useCallback(async () => {
+    const request = ++employeeRequest.current;
+    setDirectoryError('');
     try {
       const effectiveStoreId = isStoreLocked ? assignedStoreId : selectedStoreId;
       const params = new URLSearchParams();
@@ -205,7 +221,8 @@ export default function AttendancePage() {
       }
 
       const query = params.toString();
-      const response = await apiFetchWithRetry<EmployeeOption[]>(`/accounting/attendance/employees${query ? `?${query}` : ''}`).catch(() => []);
+      const response = await apiFetchWithRetry<EmployeeOption[]>(`/accounting/attendance/employees${query ? `?${query}` : ''}`);
+      if (request !== employeeRequest.current) return;
       const normalized = Array.isArray(response) ? response : [];
       setEmployeeOptions(normalized);
 
@@ -214,17 +231,20 @@ export default function AttendancePage() {
         return;
       }
 
-      if (!normalized.some((item) => item.employeeId === selectedEmployeeId)) {
-        setSelectedEmployeeId(normalized[0].employeeId);
-      }
+      setSelectedEmployeeId(current => normalized.some(item => item.employeeId === current) ? current : '');
     } catch {
+      if (request !== employeeRequest.current) return;
+      setDirectoryError('Unable to load employees. Use Refresh to try again.');
       setEmployeeOptions([]);
       setSelectedEmployeeId('');
     }
-  }, [assignedStoreId, isStoreLocked, selectedEmployeeId, selectedStoreId]);
+  }, [assignedStoreId, isStoreLocked, selectedStoreId]);
 
   const loadEmployeeReport = useCallback(async () => {
+    const request = ++reportRequest.current;
     if (!selectedEmployeeId) {
+      setIsReportLoading(false);
+      setReportError('');
       setEmployeeReport(null);
       return;
     }
@@ -241,13 +261,15 @@ export default function AttendancePage() {
         `/accounting/attendance/${encodeURIComponent(selectedEmployeeId)}/report?${params.toString()}`,
       );
 
+      if (request !== reportRequest.current) return;
       setEmployeeReport(response);
     } catch (error) {
+      if (request !== reportRequest.current) return;
       const message = error instanceof Error && error.message ? error.message : 'Unable to load employee report.';
       setReportError(message);
       setEmployeeReport(null);
     } finally {
-      setIsReportLoading(false);
+      if (request === reportRequest.current) setIsReportLoading(false);
     }
   }, [reportRange, selectedDate, selectedEmployeeId]);
 
@@ -292,221 +314,33 @@ export default function AttendancePage() {
     return attendance.records.filter((record) => record.status === statusFilter);
   }, [attendance.records, statusFilter]);
 
-  return (
-    <main className="portal-page">
-      <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-        <div style={{ padding: 20, borderBottom: '1px solid rgba(148,163,184,0.18)', display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <div style={{ fontSize: 12, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#64748b', fontWeight: 800 }}>Store Attendance</div>
-            <div style={{ fontWeight: 700, color: '#1e293b' }}>{selectedStoreLabel}</div>
-          </div>
-
-          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-            <label style={{ display: 'grid', gap: 6, color: '#334155', fontWeight: 700, fontSize: 13 }}>
-              Date
-              <input
-                type="date"
-                value={selectedDate}
-                onChange={(event) => setSelectedDate(event.target.value)}
-                style={{ minWidth: 170, padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(148,163,184,0.35)' }}
-              />
-            </label>
-
-            <label style={{ display: 'grid', gap: 6, color: '#334155', fontWeight: 700, fontSize: 13 }}>
-              Store
-              <select
-                value={(isStoreLocked ? assignedStoreId : selectedStoreId) || ''}
-                onChange={(event) => setSelectedStoreId(event.target.value)}
-                disabled={isStoreLocked}
-                style={{ minWidth: 220, padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(148,163,184,0.35)', background: isStoreLocked ? '#f8fafc' : '#ffffff' }}
-              >
-                {storeOptions.map((store) => (
-                  <option key={store.value} value={store.value}>{store.label}</option>
-                ))}
-              </select>
-            </label>
-
-            <label style={{ display: 'grid', gap: 6, color: '#334155', fontWeight: 700, fontSize: 13 }}>
-              Status
-              <select
-                value={statusFilter}
-                onChange={(event) => setStatusFilter(event.target.value as 'all' | 'present' | 'absent' | 'on_leave' | 'half_day' | 'full_day')}
-                style={{ minWidth: 180, padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(148,163,184,0.35)' }}
-              >
-                <option value="all">All</option>
-                <option value="present">Present</option>
-                <option value="full_day">Full Day</option>
-                <option value="half_day">Half Day</option>
-                <option value="on_leave">On Leave</option>
-                <option value="absent">Absent</option>
-              </select>
-            </label>
-          </div>
-        </div>
-
-        <div style={{ padding: 20, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 120px), 1fr))', gap: 12 }}>
-          <div className="card" style={{ padding: 14, border: '1px solid rgba(148,163,184,0.2)' }}><strong>{attendance.totalEmployees}</strong><div style={{ color: '#64748b', fontSize: 12 }}>Total Employees</div></div>
-          <div className="card" style={{ padding: 14, border: '1px solid rgba(16,185,129,0.2)' }}><strong>{attendance.checkedInCount}</strong><div style={{ color: '#64748b', fontSize: 12 }}>Checked In</div></div>
-          <div className="card" style={{ padding: 14, border: '1px solid rgba(59,130,246,0.2)' }}><strong>{attendance.checkedOutCount}</strong><div style={{ color: '#64748b', fontSize: 12 }}>Checked Out</div></div>
-          <div className="card" style={{ padding: 14, border: '1px solid rgba(239,68,68,0.2)' }}><strong>{attendance.notMarkedCount}</strong><div style={{ color: '#64748b', fontSize: 12 }}>Not Marked</div></div>
-          <div className="card" style={{ padding: 14, border: '1px solid rgba(14,165,233,0.2)' }}><strong>{attendanceRate.toFixed(1)}%</strong><div style={{ color: '#64748b', fontSize: 12 }}>Attendance Rate</div></div>
-        </div>
-
-        <div style={{ padding: '0 20px 18px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 120px), 1fr))', gap: 12 }}>
-          <div className="card" style={{ padding: 12, border: '1px solid rgba(34,197,94,0.2)' }}><strong>{attendance.fullDayCount}</strong><div style={{ color: '#64748b', fontSize: 12 }}>Full Day</div></div>
-          <div className="card" style={{ padding: 12, border: '1px solid rgba(249,115,22,0.2)' }}><strong>{attendance.halfDayCount}</strong><div style={{ color: '#64748b', fontSize: 12 }}>Half Day</div></div>
-          <div className="card" style={{ padding: 12, border: '1px solid rgba(168,85,247,0.2)' }}><strong>{attendance.onLeaveCount}</strong><div style={{ color: '#64748b', fontSize: 12 }}>On Leave</div></div>
-          <div className="card" style={{ padding: 12, border: '1px solid rgba(239,68,68,0.2)' }}><strong>{attendance.notMarkedCount}</strong><div style={{ color: '#64748b', fontSize: 12 }}>Absent</div></div>
-        </div>
-
-        {isLoading ? (
-          <div style={{ padding: 24, color: '#64748b', fontWeight: 600 }}>Loading attendance...</div>
-        ) : loadError ? (
-          <div style={{ padding: 24, color: '#b91c1c', fontWeight: 600 }}>{loadError}</div>
-        ) : (
-          <div style={{ overflowX: 'auto' }}>
-            <table className="table" style={{ minWidth: 980 }}>
-              <thead>
-                <tr>
-                  <th>Employee</th>
-                  <th>Employee ID</th>
-                  <th>Designation</th>
-                  <th>Check In</th>
-                  <th>Check Out</th>
-                  <th>Work Hours</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredStoreRecords.length > 0 ? (
-                  filteredStoreRecords.map((record) => (
-                    <tr key={record._id}>
-                      <td>{record.employeeName || '—'}</td>
-                      <td>{record.employeeId || '—'}</td>
-                      <td>{record.designation || '—'}</td>
-                      <td>{formatTime(record.checkInTime)}</td>
-                      <td>{formatTime(record.checkOutTime)}</td>
-                      <td>{record.workHours ? `${record.workHours.toFixed(2)}h` : '—'}</td>
-                      <td>
-                        <span className={`badge ${record.status === 'absent' ? 'danger' : record.status === 'half_day' || record.status === 'on_leave' ? 'warning' : 'success'}`} style={{ display: 'inline-block', padding: '7px 10px', borderRadius: 999, fontSize: 12, fontWeight: 700 }}>
-                          {String(record.status || 'absent').replace(/_/g, ' ').toUpperCase()}
-                        </span>
-                      </td>
-                    </tr>
-                  ))
-                ) : (
-                  <tr>
-                    <td colSpan={7} style={{ textAlign: 'center', padding: '22px 16px', color: '#64748b', fontWeight: 600 }}>
-                      No attendance records for selected date/store.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        )}
+  const visibleRecords = filteredStoreRecords.filter(record => `${record.employeeName} ${record.employeeId} ${record.designation || ''}`.toLowerCase().includes(search.toLowerCase()));
+  const badge = (status: string) => <span className={styles.badge} data-status={status === 'absent' ? 'rejected' : ['late','half_day','on_leave'].includes(status) ? 'pending' : 'approved'}>{status.replace(/_/g, ' ')}</span>;
+  return <WorkforceWorkspace actions={<button className={styles.secondary} disabled={isLoading || isReportLoading} onClick={() => { void loadAttendance(); void loadEmployeeReport(); void loadStoreOptions(); void loadEmployeeOptions(); }}>Refresh</button>}>
+    {storeError && <p className={styles.error} role="alert">{storeError}</p>}
+    <section className={styles.panel}>
+      <div className={styles.panelHeader}><div><h2>Daily attendance</h2><p>See who has checked in and review attendance by store.</p></div></div>
+      <div className={styles.filters}>
+        <label>Date<input type="date" required value={selectedDate} onChange={e => { if(e.target.value) setSelectedDate(e.target.value); }} /></label>
+        <label>Store<select value={(isStoreLocked ? assignedStoreId : selectedStoreId) || ''} disabled={isStoreLocked} onChange={e => setSelectedStoreId(e.target.value)}>{!isStoreLocked && <option value="">All stores</option>}{storeOptions.map(store => <option key={store.value} value={store.value}>{store.label}</option>)}</select></label>
+        <label>Status<select value={statusFilter} onChange={e => setStatusFilter(e.target.value as typeof statusFilter)}>{['all','present','full_day','half_day','on_leave','absent'].map(status => <option key={status} value={status}>{status === 'all' ? 'All statuses' : status.replace(/_/g,' ')}</option>)}</select></label>
+        <input aria-label="Search employees" placeholder="Search employee name or ID" value={search} onChange={e => setSearch(e.target.value)} />
       </div>
-
-      <div className="card" style={{ padding: 0, overflow: 'hidden', marginTop: 18 }}>
-        <div style={{ padding: 20, borderBottom: '1px solid rgba(148,163,184,0.18)', display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <div style={{ fontSize: 12, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#64748b', fontWeight: 800 }}>Employee Attendance Report</div>
-            <div style={{ fontWeight: 700, color: '#1e293b' }}>Daily / Weekly / Monthly</div>
-          </div>
-
-          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-            <label style={{ display: 'grid', gap: 6, color: '#334155', fontWeight: 700, fontSize: 13 }}>
-              Employee
-              <select
-                value={selectedEmployeeId}
-                onChange={(event) => setSelectedEmployeeId(event.target.value)}
-                style={{ minWidth: 260, padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(148,163,184,0.35)' }}
-              >
-                {employeeOptions.map((employee) => (
-                  <option key={employee.employeeId} value={employee.employeeId}>
-                    {employee.employeeName} ({employee.employeeId})
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label style={{ display: 'grid', gap: 6, color: '#334155', fontWeight: 700, fontSize: 13 }}>
-              Report Range
-              <select
-                value={reportRange}
-                onChange={(event) => setReportRange(event.target.value as 'daily' | 'weekly' | 'monthly')}
-                style={{ minWidth: 160, padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(148,163,184,0.35)' }}
-              >
-                <option value="daily">Daily</option>
-                <option value="weekly">Weekly</option>
-                <option value="monthly">Monthly</option>
-              </select>
-            </label>
-          </div>
-        </div>
-
-        {isReportLoading ? (
-          <div style={{ padding: 24, color: '#64748b', fontWeight: 600 }}>Loading employee report...</div>
-        ) : reportError ? (
-          <div style={{ padding: 24, color: '#b91c1c', fontWeight: 600 }}>{reportError}</div>
-        ) : !employeeReport ? (
-          <div style={{ padding: 24, color: '#64748b', fontWeight: 600 }}>No employee selected.</div>
-        ) : (
-          <>
-            <div style={{ padding: 20, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 120px), 1fr))', gap: 12 }}>
-              <div className="card" style={{ padding: 14, border: '1px solid rgba(148,163,184,0.2)' }}><strong>{employeeReport.summary.totalPeriodDays}</strong><div style={{ color: '#64748b', fontSize: 12 }}>Period Days</div></div>
-              <div className="card" style={{ padding: 14, border: '1px solid rgba(16,185,129,0.2)' }}><strong>{employeeReport.summary.markedDays}</strong><div style={{ color: '#64748b', fontSize: 12 }}>Marked</div></div>
-              <div className="card" style={{ padding: 14, border: '1px solid rgba(34,197,94,0.2)' }}><strong>{employeeReport.summary.presentDays}</strong><div style={{ color: '#64748b', fontSize: 12 }}>Present</div></div>
-              <div className="card" style={{ padding: 14, border: '1px solid rgba(245,158,11,0.2)' }}><strong>{employeeReport.summary.lateDays}</strong><div style={{ color: '#64748b', fontSize: 12 }}>Late</div></div>
-              <div className="card" style={{ padding: 14, border: '1px solid rgba(249,115,22,0.2)' }}><strong>{employeeReport.summary.halfDays}</strong><div style={{ color: '#64748b', fontSize: 12 }}>Half Days</div></div>
-              <div className="card" style={{ padding: 14, border: '1px solid rgba(239,68,68,0.2)' }}><strong>{employeeReport.summary.absentDays}</strong><div style={{ color: '#64748b', fontSize: 12 }}>Absent</div></div>
-            </div>
-
-            <div style={{ padding: '0 20px 16px', color: '#475569', fontWeight: 600, fontSize: 13 }}>
-              {employeeReport.employeeName} • {employeeReport.employeeId} • {new Date(employeeReport.startDate).toLocaleDateString()} - {new Date(employeeReport.endDate).toLocaleDateString()} • {employeeReport.summary.totalWorkHours.toFixed(2)}h worked
-            </div>
-
-            <div style={{ overflowX: 'auto' }}>
-              <table className="table" style={{ minWidth: 980 }}>
-                <thead>
-                  <tr>
-                    <th>Date</th>
-                    <th>Check In</th>
-                    <th>Check Out</th>
-                    <th>Late Minutes</th>
-                    <th>Work Hours</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {employeeReport.records.length > 0 ? (
-                    employeeReport.records.map((record) => (
-                      <tr key={record._id}>
-                        <td>{record.date ? new Date(record.date).toLocaleDateString() : '—'}</td>
-                        <td>{formatTime(record.checkInTime)}</td>
-                        <td>{formatTime(record.checkOutTime)}</td>
-                        <td>{record.lateMinutes ?? 0}</td>
-                        <td>{record.workHours ? `${record.workHours.toFixed(2)}h` : '—'}</td>
-                        <td>
-                          <span className={`badge ${record.status === 'absent' ? 'danger' : record.status === 'late' ? 'warning' : 'success'}`} style={{ display: 'inline-block', padding: '7px 10px', borderRadius: 999, fontSize: 12, fontWeight: 700 }}>
-                            {String(record.status || 'absent').replace(/_/g, ' ').toUpperCase()}
-                          </span>
-                        </td>
-                      </tr>
-                    ))
-                  ) : (
-                    <tr>
-                      <td colSpan={6} style={{ textAlign: 'center', padding: '22px 16px', color: '#64748b', fontWeight: 600 }}>
-                        No attendance entries found in selected range.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </>
-        )}
-      </div>
-    </main>
-  );
+      {loadError ? <p className={styles.error} role="alert">{loadError}</p> : isLoading ? <p className={styles.empty} role="status">Loading attendance…</p> : <>
+        <div className={styles.metrics}>{[['Employees',attendance.totalEmployees],['Checked in',attendance.checkedInCount],['Checked out',attendance.checkedOutCount],['Not marked',attendance.notMarkedCount],['Attendance rate',`${attendanceRate.toFixed(1)}%`]].map(([label,value]) => <div className={styles.metric} key={label}><span>{label}</span><strong>{value}</strong></div>)}</div>
+        <p className={styles.count}>{selectedStoreLabel} · {attendance.fullDayCount} full day · {attendance.halfDayCount} half day · {attendance.onLeaveCount} on leave · {visibleRecords.length} shown</p>
+        <div className={styles.tableWrap}><table className={styles.table}><thead><tr><th>Employee</th><th>Check-in</th><th>Check-out</th><th>Hours worked</th><th>Status</th><th /></tr></thead><tbody>{visibleRecords.map(record => <tr key={record._id}><td><strong>{record.employeeName}</strong><small>{record.employeeId} · {record.designation || 'No designation'}</small></td><td>{formatTime(record.checkInTime)}</td><td>{formatTime(record.checkOutTime)}</td><td>{record.workHours == null ? '—' : `${record.workHours.toFixed(2)}h`}</td><td>{badge(record.status)}</td><td><button className={styles.link} onClick={() => { setSelectedEmployeeId(record.employeeId); document.getElementById('employee-report')?.scrollIntoView({behavior:'smooth'}); }}>View report</button></td></tr>)}{!visibleRecords.length && <tr><td colSpan={6} className={styles.empty}>No attendance matches these filters.</td></tr>}</tbody></table></div>
+      </>}
+    </section>
+    <section id="employee-report" className={styles.panel}>
+      <div className={styles.panelHeader}><div><h2>Employee report</h2><p>Review an employee’s attendance for the selected date, week, or month.</p></div></div>
+      <div className={styles.filters}><label>Employee<select value={selectedEmployeeId} onChange={e => setSelectedEmployeeId(e.target.value)}><option value="">Choose an employee</option>{employeeOptions.map(employee => <option key={employee.employeeId} value={employee.employeeId}>{employee.employeeName} ({employee.employeeId})</option>)}</select></label><label>Period<select value={reportRange} onChange={e => setReportRange(e.target.value as typeof reportRange)}><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select></label></div>
+      {directoryError && <p className={styles.error} role="alert">{directoryError}</p>}
+      {isReportLoading ? <p className={styles.empty} role="status">Loading report…</p> : reportError ? <p className={styles.error} role="alert">{reportError}</p> : !employeeReport ? <p className={styles.empty}>Choose an employee to view their attendance.</p> : <>
+        <p className={styles.count}>{employeeReport.employeeName} · {new Date(employeeReport.startDate).toLocaleDateString()} – {new Date(employeeReport.endDate).toLocaleDateString()} · {employeeReport.summary.totalWorkHours.toFixed(2)}h worked</p>
+        <div className={styles.metrics}>{[['Present',employeeReport.summary.presentDays],['Late',employeeReport.summary.lateDays],['Half days',employeeReport.summary.halfDays],['Absent',employeeReport.summary.absentDays]].map(([label,value]) => <div className={styles.metric} key={label}><span>{label}</span><strong>{value}</strong></div>)}</div>
+        <div className={styles.tableWrap}><table className={styles.table}><thead><tr><th>Date</th><th>Check-in</th><th>Check-out</th><th>Late minutes</th><th>Hours worked</th><th>Status</th></tr></thead><tbody>{employeeReport.records.map(record => <tr key={record._id}><td>{record.date ? new Date(record.date).toLocaleDateString() : '—'}</td><td>{formatTime(record.checkInTime)}</td><td>{formatTime(record.checkOutTime)}</td><td>{record.lateMinutes ?? 0}</td><td>{record.workHours == null ? '—' : `${record.workHours.toFixed(2)}h`}</td><td>{badge(record.status)}</td></tr>)}{!employeeReport.records.length && <tr><td colSpan={6} className={styles.empty}>No attendance entries in this period.</td></tr>}</tbody></table></div>
+      </>}
+    </section>
+  </WorkforceWorkspace>;
 }
