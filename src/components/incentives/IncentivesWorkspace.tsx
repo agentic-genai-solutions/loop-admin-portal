@@ -278,8 +278,8 @@ export default function IncentivesWorkspace({ view, initiallyOpen = false }: { v
 
   const navigation = [
     { href: '/incentives', label: 'Overview', key: 'overview' },
-    { href: '/incentives/programs', label: 'Programs', key: 'programs' },
-    { href: '/incentives/entries', label: 'Rewards', key: 'entries' },
+    { href: '/incentives/programs', label: 'Reward programs', key: 'programs' },
+    { href: '/incentives/entries', label: 'Employee rewards', key: 'entries' },
   ];
   return (
     <main className={styles.workspace}>

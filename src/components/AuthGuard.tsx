@@ -138,61 +138,63 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
 
   const pageMeta = useMemo(() => {
     const currentPath = pathname || '/';
-    if (currentPath === '/attendance/timing') return { eyebrow: 'Workforce', title: 'Attendance timing' };
+    if (currentPath === '/attendance/timing') return { eyebrow: 'Attendance & shifts', title: 'Attendance rules' };
     if (currentPath === '/finance' || currentPath.startsWith('/finance/')) {
-      return { eyebrow: 'Finance', title: financeNavigation.find(item => item.href === currentPath)?.label || 'Payroll management' };
+      return { eyebrow: 'Payroll', title: financeNavigation.find(item => item.href === currentPath)?.label || 'Payroll management' };
     }
     if (currentPath === '/incentives' || currentPath.startsWith('/incentives/')) {
-      return { eyebrow: 'Incentives', title: currentPath.startsWith('/incentives/programs') ? 'Programs' : currentPath.startsWith('/incentives/entries') ? 'Employee rewards' : 'Overview' };
+      return { eyebrow: 'Rewards & incentives', title: currentPath.startsWith('/incentives/programs') ? 'Reward programs' : currentPath.startsWith('/incentives/entries') ? 'Employee rewards' : 'Overview' };
     }
 
 
+    if (currentPath.startsWith('/master-data/notifications')) return { eyebrow: 'Settings', title: 'Push notifications' };
+
     if (currentPath.startsWith('/master-data/roles')) {
-      return { eyebrow: 'Master Data', title: 'Roles' };
+      return { eyebrow: 'Settings', title: 'User roles' };
     }
 
     if (currentPath.startsWith('/master-data/designations')) {
-      return { eyebrow: 'Master Data', title: 'Designations' };
+      return { eyebrow: 'Settings', title: 'Job titles' };
     }
 
     if (currentPath.startsWith('/master-data/access-delegation')) {
-      return { eyebrow: 'Master Data', title: 'Access Delegation' };
+      return { eyebrow: 'Settings', title: 'Access permissions' };
     }
 
     if (currentPath.startsWith('/master-data/schedules')) {
-      return { eyebrow: 'Master Data', title: 'Schedules' };
+      return { eyebrow: 'Settings', title: 'Shift templates' };
     }
 
     if (currentPath.startsWith('/master-data/leave-categories')) {
-      return { eyebrow: 'Master Data', title: 'Leave Categories' };
+      return { eyebrow: 'Settings', title: 'Leave types' };
     }
 
     if (currentPath.startsWith('/master-data')) {
-      return { eyebrow: 'Master Data', title: 'Master Data' };
+      return { eyebrow: 'Settings', title: 'Settings' };
     }
 
     const routeMap: Record<string, string> = {
-      '/': 'Dashboard',
+      '/': 'Home',
       '/attendance': 'Attendance',
-      '/roster': 'Roster',
+      '/roster': 'Shift planner',
       '/leave': 'Leave Requests',
-      '/users': 'Users',
+      '/users': 'User accounts',
       '/employees': 'Employees',
       '/directors': 'Directors',
       '/onboarding': 'Onboarding',
-      '/workflow': 'Workflow',
-      '/incentives': 'Incentives',
+      '/workflow': 'Onboarding guide',
+      '/incentives': 'Rewards & incentives',
       '/reports': 'Reports',
-      '/stores': 'Store Management',
+      '/stores': 'Stores',
       '/finance': 'Payroll management',
       '/messages': 'Messages',
       '/profile': 'Profile',
     };
 
-    const section = currentPath === '/finance' ? 'Finance' : currentPath.startsWith('/master-data') ? 'Master Data'
-      : ['/attendance', '/roster', '/employees'].includes(currentPath) ? 'Workforce'
-      : ['/users', '/onboarding', '/workflow'].includes(currentPath) ? 'Onboarding'
-      : currentPath === '/' ? 'Workspace' : 'Admin';
+    const section = currentPath === '/finance' ? 'Payroll' : currentPath.startsWith('/master-data') ? 'Settings'
+      : ['/attendance', '/roster'].includes(currentPath) ? 'Attendance & shifts'
+      : ['/users', '/onboarding', '/workflow'].includes(currentPath) ? 'Accounts & onboarding'
+      : currentPath === '/' ? 'Workspace' : 'Team management';
     return { eyebrow: section, title: routeMap[currentPath] || 'Overview' };
   }, [pathname]);
 

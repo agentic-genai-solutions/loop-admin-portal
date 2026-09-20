@@ -1,5 +1,5 @@
 export const onboardingNavigation = [
   { href: '/onboarding', label: 'Overview' },
-  { href: '/users', label: 'Users' },
-  { href: '/workflow', label: 'Workflow' },
+  { href: '/users', label: 'User accounts' },
+  { href: '/workflow', label: 'Onboarding guide' },
 ];

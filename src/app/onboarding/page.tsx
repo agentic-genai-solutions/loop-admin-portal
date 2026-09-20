@@ -4,12 +4,11 @@ import Link from 'next/link';
 import OnboardingWorkspace from '@/components/onboarding/OnboardingWorkspace';
 import admin from '@/components/admin/admin.module.css';
 import styles from '@/components/onboarding/onboarding.module.css';
-import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { FeedbackToast } from '@/components/Feedback';
-import { EmptyState, TableSkeleton } from '@/components/Loaders';
+import { EmptyState } from '@/components/Loaders';
 import { apiFetchWithRetry } from '@/lib/api';
-import { isDirectorRole, isStoreScopedRole, isSuperAdminRole, normalizeRole } from '@/lib/utils';
+import { isStoreScopedRole, normalizeRole } from '@/lib/utils';
 
 function formatStageLabel(stage?: string, status?: string) {
   const raw = stage || status || 'pending';
@@ -41,7 +40,6 @@ type OnboardingProfile = {
 };
 
 export default function OnboardingPage() {
-  const router = useRouter();
   const [isLoading, setIsLoading] = useState(true);
   const [hasLoadError, setHasLoadError] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
@@ -49,16 +47,6 @@ export default function OnboardingPage() {
   const [linkedUsers, setLinkedUsers] = useState<Record<string, { name: string; role: string; status: string; email: string }>>({});
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
-  const [departmentFilter, setDepartmentFilter] = useState('All');
-  const [linkFilter, setLinkFilter] = useState<'All' | 'Linked' | 'Not linked'>('All');
-  const [sortBy, setSortBy] = useState<'candidate' | 'email' | 'role' | 'department' | 'location' | 'stage' | 'reference'>('candidate');
-  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
-
-  const departmentOptions = useMemo(
-    () => Array.from(new Set(profiles.map((profile) => profile.department).filter(Boolean))).sort(),
-    [profiles],
-  );
-
   const stats = useMemo(() => {
     const total = profiles.length;
     const approved = profiles.filter((item) => item.status === 'approved').length || 0;
@@ -148,212 +136,60 @@ export default function OnboardingPage() {
         (profile.profileCode ?? '').toLowerCase().includes(normalizedQuery);
 
       const matchesStatus = statusFilter === 'All' || profile.status === statusFilter;
-      const matchesDepartment = departmentFilter === 'All' || profile.department === departmentFilter;
-      const linkedUser = profile.email ? linkedUsers[profile.email.trim().toLowerCase()] : undefined;
-      const matchesLink =
-        linkFilter === 'All' ||
-        (linkFilter === 'Linked' && Boolean(linkedUser)) ||
-        (linkFilter === 'Not linked' && !linkedUser);
-
-      return matchesQuery && matchesStatus && matchesDepartment && matchesLink;
+      return matchesQuery && matchesStatus;
     });
-  }, [profiles, query, statusFilter, departmentFilter, linkFilter, linkedUsers]);
+  }, [profiles, query, statusFilter]);
 
-  const sortedProfiles = useMemo(() => {
-    const getCandidateName = (profile: OnboardingProfile) =>
-      [profile.firstName, profile.lastName].filter(Boolean).join(' ') || profile.firstName || profile.profileCode || '';
-
-    return [...filteredProfiles].sort((first, second) => {
-      const firstValue = sortBy === 'candidate'
-        ? getCandidateName(first)
-        : sortBy === 'email'
-          ? first.email
-          : sortBy === 'role'
-            ? normalizeRole(first.role || 'member')
-            : sortBy === 'department'
-              ? (first.department || '')
-              : sortBy === 'location'
-                ? (first.storeLabel || first.storeId || '')
-                : sortBy === 'stage'
-                  ? formatStageLabel(first.stage, first.status)
-                  : (first.profileCode || '');
-
-      const secondValue = sortBy === 'candidate'
-        ? getCandidateName(second)
-        : sortBy === 'email'
-          ? second.email
-          : sortBy === 'role'
-            ? normalizeRole(second.role || 'member')
-            : sortBy === 'department'
-              ? (second.department || '')
-              : sortBy === 'location'
-                ? (second.storeLabel || second.storeId || '')
-                : sortBy === 'stage'
-                  ? formatStageLabel(second.stage, second.status)
-                  : (second.profileCode || '');
-
-      const comparison = String(firstValue).localeCompare(String(secondValue), undefined, { sensitivity: 'base' });
-      return sortDirection === 'asc' ? comparison : -comparison;
-    });
-  }, [filteredProfiles, sortBy, sortDirection]);
-
-  const handleSort = (column: 'candidate' | 'email' | 'role' | 'department' | 'location' | 'stage' | 'reference') => {
-    if (sortBy === column) {
-      setSortDirection((current) => (current === 'asc' ? 'desc' : 'asc'));
-      return;
-    }
-
-    setSortBy(column);
-    setSortDirection('asc');
-  };
-
-  const getSortArrow = (column: 'candidate' | 'email' | 'role' | 'department' | 'location' | 'stage' | 'reference') => {
-    if (sortBy !== column) return '↕';
-    return sortDirection === 'asc' ? '↑' : '↓';
-  };
+  const sortedProfiles = useMemo(() => [...filteredProfiles].sort((a, b) =>
+    [a.firstName, a.lastName].filter(Boolean).join(' ').localeCompare(
+      [b.firstName, b.lastName].filter(Boolean).join(' '),
+    ),
+  ), [filteredProfiles]);
 
   return (
-    <OnboardingWorkspace actions={<><button className={admin.secondary} disabled={isLoading} onClick={() => void loadData()}>Refresh</button><Link className={admin.primary} href="/users">Manage users</Link></>}>
-      {toast && (
-        <FeedbackToast
-          title={toast.type === 'success' ? 'Success' : 'Error'}
-          description={toast.message}
-          type={toast.type}
-          onClose={() => setToast(null)}
-          durationMs={3200}
-        />
-      )}
+    <OnboardingWorkspace actions={<button className={admin.secondary} disabled={isLoading} onClick={() => void loadData()}>{isLoading ? 'Refreshing…' : 'Refresh'}</button>}>
+      {toast && <FeedbackToast title="Unable to refresh" description={toast.message} type={toast.type} onClose={() => setToast(null)} durationMs={3200} />}
 
-      {!isLoading && !hasLoadError && <div className={admin.metrics}>{[['Applicants',stats.total],['Pending',stats.pending],['In review',stats.inReview],['Approved',stats.approved]].map(([label,value]) => <div className={admin.metric} key={label}><span>{label}</span><strong>{value}</strong></div>)}</div>}
-      <div className={admin.panel}><div className={admin.panelHeader}><div><h2>Onboarding overview</h2><p>Find applicants and check their progress and linked user accounts.</p></div><Link className={admin.link} href="/workflow">View workflow guide →</Link></div>
-        <div className={styles.filters}>
-          <label style={{ display: 'grid', gap: 8, fontWeight: 700, color: '#475569' }}>
-            Search
-            <input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Name or email"
-              style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(148,163,184,0.35)', background: '#fff' }}
-            />
-          </label>
+      <section className={styles.overviewHero} aria-labelledby="onboarding-heading">
+        <div><span className={styles.eyebrow}>PEOPLE & ACCESS</span><h1 id="onboarding-heading">A smooth start for every team member</h1><p>Manage user accounts and follow onboarding progress, all in one place.</p></div>
+        <Link className={admin.primary} href="/users">Manage users <span aria-hidden="true">→</span></Link>
+      </section>
 
-          <label style={{ display: 'grid', gap: 8, fontWeight: 700, color: '#475569' }}>
-            Status
-            <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(148,163,184,0.35)', background: '#fff' }}>
-              <option value="All">All</option>
-              <option value="pending">Pending</option>
-              <option value="in_review">In review</option>
-              <option value="approved">Approved</option>
-            </select>
-          </label>
+      <div className={styles.shortcuts}>
+        <Link href="/users" className={styles.shortcut}><span className={styles.shortcutIcon} aria-hidden="true">01</span><div><h2>User accounts</h2><p>View team members, update their details and manage account access.</p></div><span aria-hidden="true">↗</span></Link>
+        <Link href="/workflow" className={styles.shortcut}><span className={styles.shortcutIcon} aria-hidden="true">02</span><div><h2>Onboarding guide</h2><p>See the recommended steps and responsibilities for each role.</p></div><span aria-hidden="true">↗</span></Link>
+      </div>
 
-          <label style={{ display: 'grid', gap: 8, fontWeight: 700, color: '#475569' }}>
-            Department
-            <select value={departmentFilter} onChange={(event) => setDepartmentFilter(event.target.value)} style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(148,163,184,0.35)', background: '#fff' }}>
-              <option value="All">All</option>
-              {departmentOptions.map((department) => (
-                <option key={department} value={department}>{department}</option>
-              ))}
-            </select>
-          </label>
-
-          <label style={{ display: 'grid', gap: 8, fontWeight: 700, color: '#475569' }}>
-            Linked user
-            <select value={linkFilter} onChange={(event) => setLinkFilter(event.target.value as 'All' | 'Linked' | 'Not linked')} style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(148,163,184,0.35)', background: '#fff' }}>
-              <option value="All">All</option>
-              <option value="Linked">Linked</option>
-              <option value="Not linked">Not linked</option>
-            </select>
-          </label>
-
+      {isLoading ? <div className={styles.loading} role="status">Loading onboarding progress…</div> : hasLoadError ? (
+        <section className={admin.panel}><EmptyState variant="error" onRetry={loadData} /></section>
+      ) : profiles.length === 0 ? (
+        <section className={styles.welcome} aria-labelledby="no-applicants">
+          <span className={styles.welcomeIcon} aria-hidden="true">✓</span>
+          <div><h2 id="no-applicants">No applicants to track yet</h2><p>Onboarding profiles will appear here when they are available. You can manage existing team members from User accounts.</p></div>
+        </section>
+      ) : <>
+        <div className={styles.progressSummary} aria-label="Applicant summary">
+          {[['Applicants',stats.total],['Pending',stats.pending],['In review',stats.inReview],['Approved',stats.approved]].map(([label,value]) => <div key={label}><strong>{value}</strong><span>{label}</span></div>)}
         </div>
-      </div>
-
-      <div className={admin.panel}>
-        <p className={admin.count}>{sortedProfiles.length} applicants shown</p>
-        {isLoading ? (
-          <TableSkeleton columns={7} rows={4} />
-        ) : hasLoadError ? (
-          <EmptyState variant="error" onRetry={loadData} />
-        ) : (
-          <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
-            <table className={admin.table} style={{ minWidth: 980 }}>
-              <thead>
-                <tr>
-                  <th>
-                    <button type="button" onClick={() => handleSort('candidate')} style={{ border: 'none', background: 'transparent', color: 'inherit', fontWeight: 800, cursor: 'pointer', padding: 0 }}>
-                      Candidate {getSortArrow('candidate')}
-                    </button>
-                  </th>
-                  <th>Linked user</th>
-                  <th>
-                    <button type="button" onClick={() => handleSort('role')} style={{ border: 'none', background: 'transparent', color: 'inherit', fontWeight: 800, cursor: 'pointer', padding: 0 }}>
-                      Role {getSortArrow('role')}
-                    </button>
-                  </th>
-                  <th>
-                    <button type="button" onClick={() => handleSort('department')} style={{ border: 'none', background: 'transparent', color: 'inherit', fontWeight: 800, cursor: 'pointer', padding: 0 }}>
-                      Department {getSortArrow('department')}
-                    </button>
-                  </th>
-                  <th>
-                    <button type="button" onClick={() => handleSort('location')} style={{ border: 'none', background: 'transparent', color: 'inherit', fontWeight: 800, cursor: 'pointer', padding: 0 }}>
-                      Location {getSortArrow('location')}
-                    </button>
-                  </th>
-                  <th>
-                    <button type="button" onClick={() => handleSort('stage')} style={{ border: 'none', background: 'transparent', color: 'inherit', fontWeight: 800, cursor: 'pointer', padding: 0 }}>
-                      Stage {getSortArrow('stage')}
-                    </button>
-                  </th>
-                  <th>
-                    <button type="button" onClick={() => handleSort('reference')} style={{ border: 'none', background: 'transparent', color: 'inherit', fontWeight: 800, cursor: 'pointer', padding: 0 }}>
-                      Reference {getSortArrow('reference')}
-                    </button>
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {sortedProfiles.length > 0 ? (
-                  sortedProfiles.map((item) => {
-                    const linkedUser = item.email ? linkedUsers[item.email.trim().toLowerCase()] : undefined;
-
-                    return (
-                      <tr key={item._id || item.profileCode}>
-                        <td>
-                          <div style={{ fontWeight: 700 }}>{item.firstName && item.lastName ? `${item.firstName} ${item.lastName}` : item.firstName || item.profileCode}</div>
-                          <div style={{ color: '#64748b', fontSize: 12 }}>{item.email || 'No email provided'}</div>
-                        </td>
-                        <td>
-                          {linkedUser ? (
-                            <div>
-                              <div style={{ fontWeight: 700 }}>{linkedUser.name}</div>
-                              <div style={{ color: '#64748b', fontSize: 12 }}>{formatLinkedStatus(linkedUser)}</div>
-                            </div>
-                          ) : (
-                            <span style={{ color: '#94a3b8' }}>Not linked</span>
-                          )}
-                        </td>
-                        <td>{normalizeRole(item.role || 'member')}</td>
-                        <td>{item.department || 'Unassigned'}</td>
-                        <td>{item.storeLabel || item.storeId || 'Unassigned'}</td>
-                        <td>
-                          <span className={`badge ${item.status === 'approved' ? 'success' : item.status === 'in_review' ? 'info' : 'warning'}`}>
-                            {formatStageLabel(item.stage, item.status)}
-                          </span>
-                        </td>
-                        <td>{item.profileCode || 'Loop profile'}</td>
-                      </tr>
-                    );
-                  })
-                ) : (
-                  <EmptyState colSpan={7} title="No onboarding profiles found" description="Try changing the filters or check for a different applicant status." />
-                )}
-              </tbody>
-            </table>
+        <section className={admin.panel} aria-labelledby="applicant-heading">
+          <div className={admin.panelHeader}><div><h2 id="applicant-heading">Applicants</h2><p>Check each applicant’s progress and linked account.</p></div><span className={admin.count} aria-live="polite">{sortedProfiles.length} of {profiles.length} shown</span></div>
+          <div className={styles.applicantFilters}>
+            <label>Find an applicant<input type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search by name, email or reference" /></label>
+            <label>Status<select value={statusFilter} onChange={event => setStatusFilter(event.target.value)}><option value="All">All statuses</option>{Array.from(new Set(profiles.map(profile => profile.status).filter(Boolean))).sort().map(status => <option key={status} value={status}>{formatStageLabel(status)}</option>)}</select></label>
           </div>
-        )}
-      </div>
+          {sortedProfiles.length === 0 ? <div className={admin.empty}><p>No applicants match your search.</p><button className={admin.secondary} onClick={() => {setQuery('');setStatusFilter('All');}}>Clear filters</button></div> : (
+            <ul className={styles.applicantList}>{sortedProfiles.map(item => {
+              const name = [item.firstName, item.lastName].filter(Boolean).join(' ') || item.profileCode || 'Applicant';
+              const linkedUser = item.email ? linkedUsers[item.email.trim().toLowerCase()] : undefined;
+              return <li key={item._id || item.profileCode}>
+                <div className={styles.applicantIdentity}><span className={styles.avatar} aria-hidden="true">{name.slice(0,1).toUpperCase()}</span><div><h3>{name}</h3><p>{item.email || 'No email provided'}</p>{item.profileCode && <small>{item.profileCode}</small>}</div></div>
+                <div className={styles.applicantMeta}><strong>{normalizeRole(item.role || 'member')}</strong><p>{[item.department, item.storeLabel || item.storeId].filter(Boolean).join(' · ') || 'No store assigned'}</p></div>
+                <div className={styles.applicantStatus}><span className={admin.badge} data-status={item.status}>{formatStageLabel(item.stage, item.status)}</span><small>{formatLinkedStatus(linkedUser)}</small></div>
+              </li>;
+            })}</ul>
+          )}
+        </section>
+      </>}
     </OnboardingWorkspace>
   );
 }
